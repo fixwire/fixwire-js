@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fixwire browser example</title>
+  </head>
+  <body>
+    <main>
+      <h1>Coffee shop</h1>
+      <p>Each button breaks something the way real pages break.</p>
+      <button type="button" id="add">Add to cart (TypeError)</button>
+      <button type="button" id="checkout">Checkout (unhandled rejection)</button>
+      <button type="button" id="handled">Apply coupon (handled, with context)</button>
+      <button type="button" id="api">Load recommendations (fetch fails)</button>
+      <p id="status"></p>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

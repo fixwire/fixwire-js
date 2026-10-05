@@ -1,0 +1,31 @@
+{
+  "name": "@fixwire/browser",
+  "version": "0.1.0",
+  "description": "Fixwire SDK for browsers",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "fixwire-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./offline": {
+      "fixwire-source": "./src/offline.ts",
+      "types": "./dist/offline.d.ts",
+      "default": "./dist/offline.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "dependencies": {
+    "@fixwire/core": "workspace:*"
+  }
+}

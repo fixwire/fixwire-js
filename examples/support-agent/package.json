@@ -1,0 +1,12 @@
+{
+  "name": "example-support-agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --conditions=fixwire-source agent.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@fixwire/node": "workspace:*"
+  }
+}

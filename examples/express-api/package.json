@@ -1,0 +1,12 @@
+{
+  "name": "example-express-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --conditions=fixwire-source server.mjs"
+  },
+  "dependencies": {
+    "@fixwire/node": "workspace:*",
+    "express": "^5.1.0"
+  }
+}

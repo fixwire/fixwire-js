@@ -1,0 +1,14 @@
+{
+  "name": "fixwire-types-test",
+  "private": true,
+  "type": "module",
+  "description": "Compiles against the built packages, as an npm user would (no source condition).",
+  "dependencies": {
+    "@fixwire/browser": "workspace:*",
+    "@fixwire/core": "workspace:*",
+    "@fixwire/edge": "workspace:*",
+    "@fixwire/node": "workspace:*",
+    "@fixwire/react": "workspace:*",
+    "@opentelemetry/api": "^1.9.1"
+  }
+}

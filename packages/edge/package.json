@@ -1,0 +1,26 @@
+{
+  "name": "@fixwire/edge",
+  "version": "0.1.0",
+  "description": "Fixwire SDK for edge runtimes: Cloudflare Workers, Vercel Edge, Deno and Netlify Edge Functions",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "fixwire-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "dependencies": {
+    "@fixwire/core": "workspace:*"
+  }
+}

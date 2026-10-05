@@ -1,0 +1,17 @@
+Fixwire SDKs for JavaScript
+
+This product includes software developed by Functional Software, Inc. dba
+Sentry (getsentry/sentry-javascript @ ec4931e, version 11.4.0), licensed under
+the MIT License; see LICENSE. Ported files say so in their header.
+
+It also includes, through those files:
+- TraceKit, Copyright (c) 2013 Onur Can Cakmak and all TraceKit contributors,
+  MIT License (packages/browser/src/stack-parsers.ts);
+- node-stack-trace, Copyright (c) 2011 Felix Geisendörfer, MIT License
+  (packages/core/src/node-stack-trace.ts).
+
+No code from the Sentry CLI, the Sentry bundler plugins or any other
+FSL- or BUSL-licensed project is included.
+
+"Sentry" is a trademark of Functional Software, Inc. Fixwire is not affiliated
+with or endorsed by Sentry.

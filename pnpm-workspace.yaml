@@ -1,0 +1,8 @@
+packages:
+  - "packages/*"
+  - "examples/*"
+  - "types-test"
+
+# esbuild (the size check) installs its platform binary in a build script.
+allowBuilds:
+  esbuild: true

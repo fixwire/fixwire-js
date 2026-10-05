@@ -1,0 +1,29 @@
+{
+  "name": "@fixwire/react",
+  "version": "0.1.0",
+  "description": "Fixwire SDK for React: error boundaries and root error handlers",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "fixwire-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "dependencies": {
+    "@fixwire/browser": "workspace:*"
+  }
+}
