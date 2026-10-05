@@ -92,6 +92,11 @@ for (const [text, masked] of [
   ["bearer abcdefghij\u212a/x", "bearer [REDACTED:http_auth]"],
   // Six characters as the server counts them: code points.
   ["pwd:abc\u{1F600}a", "pwd:abc\u{1F600}a"],
+  // Too short there, so the server looks again one character on and finds the next assignment.
+  [
+    'token=\u{1F600}\u{1F600}pwd"=abcdefgh',
+    'token=\u{1F600}\u{1F600}pwd"=[REDACTED:secret_assignment]',
+  ],
   [
     `a ${BEGIN}RSA PRIVATE KEY-----\nMII\n-----END RSA PRIVATE KEY----- b ${BEGIN}EC PRIVATE KEY-----`,
     `a [REDACTED:private_key] b ${BEGIN}EC PRIVATE KEY-----`,

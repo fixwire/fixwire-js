@@ -48,6 +48,8 @@ interface Detector {
   validate?: (s: string) => boolean;
   scan?: (s: string) => Span[];
   may?: (s: string) => boolean;
+  /** The group's least length in code points, where the pattern counts UTF-16 units. */
+  minCodePoints?: number;
 }
 
 const isDigit = (c: number): boolean => c >= 48 && c <= 57;
@@ -476,7 +478,8 @@ const REGISTRY: Detector[] = [
     ),
     group: 1,
     // Six characters as the server counts them: code points, not UTF-16 units.
-    validate: (v) => unmasked(v) && (v.length >= 12 || [...v].length >= 6),
+    minCodePoints: 6,
+    validate: unmasked,
   },
   { name: "email", prefilter: ["@"], caseSensitive: true, scan: emailSpans },
   { name: "credit_card", scan: cardSpans },
@@ -510,18 +513,40 @@ export const DEFAULT_DETECTORS: readonly string[] = REGISTRY.filter((d) => d.nam
 function spans(d: Detector, s: string): Span[] {
   if (d.scan) return d.scan(s);
   const out: Span[] = [];
-  for (const m of s.matchAll(d.re as RegExp)) {
-    const start = m.index ?? 0;
+  const re = new RegExp(d.re as RegExp); // its own lastIndex
+  for (let m = re.exec(s); m !== null; m = re.exec(s)) {
+    const start = m.index;
     const group = d.group
-      ? (m as RegExpMatchArray & { indices?: [number, number][] }).indices?.[d.group]
+      ? (m as RegExpExecArray & { indices?: [number, number][] }).indices?.[d.group]
       : undefined;
-    if (group) {
-      out.push([group[0], group[1]]);
-    } else {
-      out.push([start, start + m[0].length]);
+    const [from, to] = group ?? [start, start + m[0].length];
+    if (m[0].length === 0) re.lastIndex = start + 1; // never loop on an empty match
+    if (d.minCodePoints && codePoints(s, from, to) < d.minCodePoints) {
+      // The server finds no match starting here: look again one character on.
+      re.lastIndex = start + 1;
+      continue;
     }
+    out.push([from, to]);
   }
   return out;
+}
+
+function codePoints(s: string, from: number, to: number): number {
+  let n = 0;
+  for (let i = from; i < to; i++) {
+    const c = s.charCodeAt(i);
+    if (
+      !(
+        c >= 0xdc00 &&
+        c <= 0xdfff &&
+        i > from &&
+        s.charCodeAt(i - 1) >= 0xd800 &&
+        s.charCodeAt(i - 1) <= 0xdbff
+      )
+    )
+      n++;
+  }
+  return n;
 }
 
 /** Orders strings like Go and Python do (by code point, not UTF-16 unit). */
