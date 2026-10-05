@@ -261,6 +261,114 @@ function mayHoldIBAN(s: string): boolean {
 
 const WS = "[\\t\\n\\f\\r ]";
 
+// Case-insensitive "s" and "k" as the server folds them (the long s and the
+// Kelvin sign), and the letters its case-insensitive classes add to [A-Za-z].
+const S = "[s\\u017f]";
+const K = "[k\\u212a]";
+const FOLDED = "\\u017f\\u212a";
+
+/**
+ * Lower case one code point at a time, like the server: only U+0130 lowers
+ * to two code units in JavaScript, and the server makes it "i".
+ */
+const lower = (s: string): string =>
+  (s.includes("\u0130") ? s.replaceAll("\u0130", "i") : s).toLowerCase();
+
+// Scanners for two of the server's patterns: the same leftmost matches in
+// linear time (as regular expressions they backtrack quadratically on text
+// like "a.a.a….://" or many BEGIN lines without an END).
+
+const KEY_LABEL = "PRIVATE KEY-----";
+
+/**
+ * The end of `(?:[A-Z ]+ )?PRIVATE KEY-----` at i, or -1. "PRIVATE KEY"
+ * can only end the run of capitals and spaces from i.
+ */
+function keyLabelEnd(s: string, i: number): number {
+  let run = i;
+  while (run < s.length && (isUpper(s.charCodeAt(run)) || s.charCodeAt(run) === 32)) run++;
+  const label = run - 11; // "PRIVATE KEY"
+  if (label < i || !s.startsWith(KEY_LABEL, label)) return -1;
+  if (label > i && (label < i + 2 || s.charCodeAt(label - 1) !== 32)) return -1;
+  return label + KEY_LABEL.length;
+}
+
+/** Each BEGIN line of a private key with the first END line after it. */
+function privateKeySpans(s: string): Span[] {
+  const out: Span[] = [];
+  for (let from = 0; ; ) {
+    const begin = s.indexOf("-----BEGIN ", from);
+    if (begin < 0) return out;
+    const head = keyLabelEnd(s, begin + 11);
+    if (head < 0) {
+      from = begin + 1;
+      continue;
+    }
+    let end = -1;
+    for (
+      let line = s.indexOf("-----END ", head);
+      line >= 0;
+      line = s.indexOf("-----END ", line + 1)
+    ) {
+      end = keyLabelEnd(s, line + 9);
+      if (end >= 0) break;
+    }
+    if (end < 0) return out; // a later BEGIN line finds no END line either
+    out.push([begin, end]);
+    from = end;
+  }
+}
+
+const isScheme = (c: number): boolean =>
+  isAlpha(c) || isDigit(c) || c === 43 || c === 46 || c === 45; // + . -
+const endsPassword = (c: number): boolean =>
+  c === 9 ||
+  c === 10 ||
+  c === 12 ||
+  c === 13 ||
+  c === 32 ||
+  c === 47 ||
+  c === 63 ||
+  c === 35 ||
+  c === 64; // \t\n\f\r /?#@
+
+/**
+ * The password in scheme://user:password@host. Every start in the scheme
+ * before one "://" shares the rest of the match, so only the first is tried.
+ */
+function urlCredentialSpans(s: string): Span[] {
+  const out: Span[] = [];
+  const n = s.length;
+  let from = 0;
+  let sep = s.indexOf("://");
+  while (sep >= 0) {
+    let scheme = sep;
+    while (scheme > from && isScheme(s.charCodeAt(scheme - 1))) scheme--;
+    // The first letter at a word boundary starts the scheme.
+    while (
+      scheme < sep &&
+      !(isAlpha(s.charCodeAt(scheme)) && (scheme === 0 || !isWord(s.charCodeAt(scheme - 1))))
+    )
+      scheme++;
+    if (scheme < sep) {
+      let user = sep + 3;
+      while (user < n && s.charCodeAt(user) !== 58 && !endsPassword(s.charCodeAt(user))) user++;
+      if (user < n && s.charCodeAt(user) === 58) {
+        let end = user + 1;
+        while (end < n && !endsPassword(s.charCodeAt(end))) end++;
+        if (end > user + 1 && end < n && s.charCodeAt(end) === 64) {
+          out.push([user + 1, end]);
+          from = end + 1;
+          sep = s.indexOf("://", from);
+          continue;
+        }
+      }
+    }
+    sep = s.indexOf("://", sep + 1);
+  }
+  return out;
+}
+
 /** Rejects values a scrubber already replaced. */
 const unmasked = (v: string): boolean => !v.startsWith("[REDACTED") && v !== FILTERED;
 
@@ -280,7 +388,7 @@ const REGISTRY: Detector[] = [
     name: "private_key",
     prefilter: ["PRIVATE KEY-----"],
     caseSensitive: true,
-    re: /-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----/g,
+    scan: privateKeySpans,
   },
   {
     name: "aws_access_key",
@@ -292,7 +400,7 @@ const REGISTRY: Detector[] = [
   {
     name: "azure_storage_key",
     prefilter: ["accountkey="],
-    re: /AccountKey=([A-Za-z0-9+/]{86}==)/dgi,
+    re: g(`Account${K}ey=([A-Za-z0-9+/${FOLDED}]{86}==)`, "di"),
     group: 1,
   },
   {
@@ -348,15 +456,14 @@ const REGISTRY: Detector[] = [
     name: "url_credentials",
     prefilter: ["://"],
     caseSensitive: true,
-    re: /\b[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\t\n\f\r /?#@:]*:([^\t\n\f\r /?#@]+)@/dg,
-    group: 1,
+    scan: urlCredentialSpans,
     validate: unmasked,
   },
   {
     // Bearer and Basic credentials outside a header (messages, breadcrumbs).
     name: "http_auth",
     prefilter: ["bearer", "basic"],
-    re: g(`\\b(?:bearer|basic)${WS}+([A-Za-z0-9._~+/-]{12,}=*)`, "di"),
+    re: g(`\\b(?:bearer|ba${S}ic)${WS}+([A-Za-z0-9._~+/${FOLDED}-]{12,}=*)`, "di"),
     group: 1,
     validate: credentialLike,
   },
@@ -364,11 +471,12 @@ const REGISTRY: Detector[] = [
     name: "secret_assignment",
     prefilter: ["pass", "secret", "token", "api_key", "apikey", "api-key", "pwd"],
     re: g(
-      `\\b(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key)["']?${WS}*[:=]${WS}*["']?([^\\t\\n\\f\\r "',;&]{6,})`,
+      `\\b(?:pa${S}${S}word|pa${S}${S}wd|pwd|${S}ecret|to${K}en|api[_-]?${K}ey|acce${S}${S}[_-]?${K}ey)["']?${WS}*[:=]${WS}*["']?([^\\t\\n\\f\\r "',;&]{6,})`,
       "di",
     ),
     group: 1,
-    validate: unmasked,
+    // Six characters as the server counts them: code points, not UTF-16 units.
+    validate: (v) => unmasked(v) && (v.length >= 12 || [...v].length >= 6),
   },
   { name: "email", prefilter: ["@"], caseSensitive: true, scan: emailSpans },
   { name: "credit_card", scan: cardSpans },
@@ -427,7 +535,7 @@ const byCodePoint = (a: string, b: string): number => {
   return x.length - y.length;
 };
 
-const normalizeKey = (k: string): string => k.toLowerCase().replace(/[-_ ]/g, "");
+const normalizeKey = (k: string): string => lower(k).replace(/[-_ ]/g, "");
 const tokenCount = (k: string): boolean =>
   k.endsWith("tokens") || k.includes("tokencount") || k.includes("usage");
 const empty = (v: unknown): boolean => v === null || v === undefined || v === "";
@@ -461,11 +569,11 @@ export class Redactor {
   /** Non-overlapping findings, leftmost first; on overlap the earlier detector wins. */
   find(s: string): Finding[] {
     const out: Finding[] = [];
-    let lower: string | undefined;
+    let lowered: string | undefined;
     for (const d of this.detectors) {
       if (d.prefilter) {
-        if (!d.caseSensitive && lower === undefined) lower = s.toLowerCase();
-        const hay = d.caseSensitive ? s : (lower as string);
+        if (!d.caseSensitive && lowered === undefined) lowered = lower(s);
+        const hay = d.caseSensitive ? s : (lowered as string);
         if (!d.prefilter.some((p) => hay.includes(p))) continue;
       }
       if (d.may && !d.may(s)) continue;

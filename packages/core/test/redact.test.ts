@@ -63,3 +63,52 @@ for (const c of corpus.documents) {
     assert.equal(count, c.count);
   });
 }
+
+// Beyond the corpus: what fuzzing against the server's code found.
+
+const BEGIN = "-----BEGIN "; // split, so no scanner sees a whole key
+
+for (const [name, text] of [
+  ["a URL scheme that never ends", `${"a.".repeat(50_000)}://`],
+  ["BEGIN lines without an END", `${BEGIN}RSA PRIVATE KEY-----\n`.repeat(3_000)],
+  ["many URLs without a password", "x://u:".repeat(20_000)],
+]) {
+  test(`hostile text is masked in linear time: ${name}`, () => {
+    const started = performance.now();
+    new Redactor().mask(text);
+    assert.ok(performance.now() - started < 500);
+  });
+}
+
+for (const [text, masked] of [
+  // The server folds the long s and the Kelvin sign in its case-insensitive detectors
+  // (once a plain keyword got the text past their prefilter). Expected values from its code.
+  ["to\u212aen=abcdefgh", "to\u212aen=[REDACTED:secret_assignment]"],
+  [
+    "password: hunter2 pa\u017f\u017fword: hunter2hunter2",
+    "password: [REDACTED:secret_assignment] pa\u017f\u017fword: [REDACTED:secret_assignment]",
+  ],
+  ["basic x ba\u017fic dXNlcjpwYXNzd29yZA==", "basic x ba\u017fic [REDACTED:http_auth]"],
+  ["bearer abcdefghij\u212a/x", "bearer [REDACTED:http_auth]"],
+  // Six characters as the server counts them: code points.
+  ["pwd:abc\u{1F600}a", "pwd:abc\u{1F600}a"],
+  [
+    `a ${BEGIN}RSA PRIVATE KEY-----\nMII\n-----END RSA PRIVATE KEY----- b ${BEGIN}EC PRIVATE KEY-----`,
+    `a [REDACTED:private_key] b ${BEGIN}EC PRIVATE KEY-----`,
+  ],
+  [
+    "x://u:p:q@h://v:w@z 1a://u:p@h",
+    "x://u:[REDACTED:url_credentials]@h://v:[REDACTED:url_credentials]@z 1a://u:p@h",
+  ],
+]) {
+  test(`matches the server beyond the corpus: ${JSON.stringify(text).slice(0, 40)}`, () => {
+    assert.equal(new Redactor().mask(text)[0], masked);
+  });
+}
+
+test("keys lower-case like the server", () => {
+  // JavaScript lowers U+0130 to two code units; the server to "i".
+  const [doc, n] = new Redactor().walk({ "ap\u0130key": "abc", x: "y" });
+  assert.deepEqual(doc, { "ap\u0130key": "[Filtered]", x: "y" });
+  assert.equal(n, 1);
+});
