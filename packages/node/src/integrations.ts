@@ -206,7 +206,7 @@ function serverSpan(request: IncomingMessage, response: ServerResponse | undefin
  */
 /**
  * Whether an incoming request delivers telemetry: an ingest endpoint
- * (sdks/PROTOCOL.md), with a key.
+ * (fixwire-protocol), with a key.
  */
 function isDelivery(request: IncomingMessage): boolean {
   const url = request.url ?? "";

@@ -8,7 +8,7 @@
  * JSON, size guard, compression) and sending run asynchronously, and only
  * for what will be sent. Redaction runs after beforeSend, so nothing a
  * callback adds escapes it. Each kind of data has its endpoint
- * (sdks/PROTOCOL.md): errors, messages and spans travel as OTLP/HTTP JSON,
+ * (fixwire-protocol): errors, messages and spans travel as OTLP/HTTP JSON,
  * sessions, feedback and check-ins as Fixwire JSON.
  */
 import { Delivery, type Outbound } from "./delivery.ts";

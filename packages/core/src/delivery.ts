@@ -3,7 +3,7 @@
  * queue policy, retries with backoff and rate limits. The client feeds it
  * time and HTTP outcomes; it never sets timers itself.
  *
- * Bounds (sdks/PROTOCOL.md §13): a request is sent at most 4 times in all:
+ * Bounds (fixwire-protocol §13): a request is sent at most 4 times in all:
  * again after no answer or a 5xx (about 1 s, then twice as long each time,
  * never sooner than Retry-After) and after a 429's pause. One whose next
  * try would be more than 5 minutes away is dropped. Retry-After (seconds
@@ -22,7 +22,7 @@ export const MAX_ATTEMPTS = 4;
 const DEFAULT_RETRY_AFTER = 60;
 /** The longest pause a server can ask for: a day (seconds). */
 const MAX_PAUSE = 86_400;
-/** The kinds of data a pause may name (sdks/PROTOCOL.md §2); "" is all of them. */
+/** The kinds of data a pause may name (fixwire-protocol §2); "" is all of them. */
 const CATEGORIES = ["", "error", "log", "span", "session", "check_in", "feedback", "file"];
 
 /** Whole seconds from a header, at most a day; undefined when broken. */

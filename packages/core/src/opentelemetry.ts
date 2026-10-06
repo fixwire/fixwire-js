@@ -59,7 +59,7 @@ export interface OtlpTarget {
 
 /**
  * OTLP/HTTP exporter options for a DSN: traces and logs on the DSN's base
- * URL (sdks/PROTOCOL.md §3–4), with the key as a bearer token.
+ * URL (fixwire-protocol §3–4), with the key as a bearer token.
  */
 export function otlpExporterOptions(dsn: string): { traces: OtlpTarget; logs: OtlpTarget } {
   const d = parseDsn(dsn);

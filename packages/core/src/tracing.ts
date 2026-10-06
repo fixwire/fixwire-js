@@ -3,8 +3,8 @@
  * span started with no active span is a segment: the root of what this
  * process does for one request, task or page. Spans ended under a segment
  * are buffered with it and sent together when it ends, as one OTLP export
- * (sdks/PROTOCOL.md §3). Traces cross services through the W3C
- * `traceparent` and `tracestate` headers (sdks/PROTOCOL.md §9); `baggage`
+ * (fixwire-protocol §3). Traces cross services through the W3C
+ * `traceparent` and `tracestate` headers (fixwire-protocol §9); `baggage`
  * passes through untouched, so a fleet mixing OpenTelemetry and Fixwire
  * shares one trace. Sampling follows the caller's decision; a new trace
  * decides from its id, alike in every service.

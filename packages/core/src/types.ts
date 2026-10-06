@@ -126,7 +126,7 @@ export interface Feedback {
   source?: string;
 }
 
-/** A scheduled job's run, reported to its monitor (sdks/PROTOCOL.md §6). */
+/** A scheduled job's run, reported to its monitor (fixwire-protocol §6). */
 export interface CheckIn {
   /** The monitor's slug, e.g. `"nightly-report"`. */
   monitorSlug: string;

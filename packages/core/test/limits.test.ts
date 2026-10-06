@@ -1,4 +1,4 @@
-// What every Fixwire SDK guarantees (sdks/PROTOCOL.md §13): the bounds on
+// What every Fixwire SDK guarantees (fixwire-protocol §13): the bounds on
 // what is sent, and that capturing never gets in the app's way.
 import assert from "node:assert/strict";
 import { test } from "node:test";

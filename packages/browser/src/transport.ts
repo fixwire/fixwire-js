@@ -2,7 +2,7 @@
  * fetch, with the key in the Authorization header. While the page is
  * hidden (it may be closing), a small body goes as a keepalive request
  * the browser can send without a CORS preflight, so it survives the
- * unload: the key in the query (sdks/PROTOCOL.md §2) and JSON as
+ * unload: the key in the query (fixwire-protocol §2) and JSON as
  * text/plain. Browsers cap keepalive bodies at 64 KB in flight.
  */
 import type { Transport, TransportResponse } from "@fixwire/core";

@@ -1,6 +1,6 @@
 /**
  * OTLP/HTTP JSON, written by hand so browsers ship no OpenTelemetry
- * (sdks/PROTOCOL.md §3–4): errors and messages become log records, spans
+ * (fixwire-protocol §3–4): errors and messages become log records, spans
  * OTLP spans, each under a resource that names the release, environment
  * and SDK. Ids are hex; 64-bit integers travel as decimal strings.
  */
@@ -108,7 +108,7 @@ const exception = (x: Exception) => ({
 });
 
 /**
- * An error or message as a log record (sdks/PROTOCOL.md §4). The event's
+ * An error or message as a log record (fixwire-protocol §4). The event's
  * exceptions run cause first; `fixwire.exceptions` runs outermost first.
  */
 export function eventRecord(e: Event): Record<string, unknown> {

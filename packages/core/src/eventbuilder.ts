@@ -8,7 +8,7 @@ type DebugImage = { type: string; code_file: string; debug_id: string };
 let debugIds: [number, Record<string, string>] | undefined;
 
 /**
- * Source map debug ids of the bundles in an event's stack (sdks/PROTOCOL.md
+ * Source map debug ids of the bundles in an event's stack (fixwire-protocol
  * §10). fixwire-cli injects into each bundle a line that registers it in
  * `globalThis._fixwireDebugIds`: the stack at that line, mapped to the
  * bundle's debug id. That stack's newest frame names the bundle's file.
