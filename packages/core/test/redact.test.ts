@@ -1,24 +1,17 @@
-// The shared corpus from pkg/redact in fixwire/fixwire: the server's scrubber and this
-// port must agree on every case.
+// The shared corpus of the Fixwire server's redaction (a copy of
+// pkg/redact/testdata/vectors.json in fixwire/fixwire, kept identical): the
+// server's scrubber and this port must agree on every case.
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { DEFAULT_DETECTORS, DEFAULT_SENSITIVE_KEYS, Redactor } from "../src/redact.ts";
 
-/** The corpus, in the repository root's pkg/ above this SDK (wherever it sits). */
-function corpusPath(): string {
-  for (let dir = dirname(fileURLToPath(import.meta.url)); ; dir = dirname(dir)) {
-    const candidate = join(dir, "pkg", "redact", "testdata", "vectors.json");
-    if (existsSync(candidate)) return candidate;
-    if (dirname(dir) === dir)
-      throw new Error("pkg/redact/testdata/vectors.json not found above this test");
-  }
-}
-
-const corpus = JSON.parse(readFileSync(corpusPath(), "utf8")) as {
+const corpus = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "vectors.json"), "utf8"),
+) as {
   detectors: string[];
   sensitive_keys: string[];
   fixtures: Record<string, string[]>;
