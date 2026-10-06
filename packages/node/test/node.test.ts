@@ -3,7 +3,6 @@ import { spawn } from "node:child_process";
 import { createServer, request, type Server } from "node:http";
 import { hostname } from "node:os";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 
 import {
@@ -161,7 +160,8 @@ test("each HTTP request is a session, sent as per-minute aggregates", async () =
 
 test("an uncaught exception is reported before the process exits", async () => {
   const { server, dsn, got } = await ingest();
-  const index = fileURLToPath(new URL("../src/index.ts", import.meta.url));
+  // A URL, not a path: on Windows, import() reads D:\\… as a URL scheme.
+  const index = new URL("../src/index.ts", import.meta.url).href;
   const script = `
     const Fixwire = await import(${JSON.stringify(index)});
     Fixwire.init({ dsn: ${JSON.stringify(dsn)} });

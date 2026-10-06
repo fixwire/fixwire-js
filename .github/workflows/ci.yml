@@ -29,7 +29,13 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: test (every package and the examples, against a fake ingest)
+        if: runner.os != 'Windows'
         run: pnpm test
+      # The examples stop on SIGTERM, as containers stop apps, and the test checks what they send
+      # then: Windows has no SIGTERM to send them. The packages are tested there.
+      - name: test (every package)
+        if: runner.os == 'Windows'
+        run: node --conditions=fixwire-source --test "packages/*/test/*.test.ts"
 
   oldest-node:
     name: Node 20 (the built package)
