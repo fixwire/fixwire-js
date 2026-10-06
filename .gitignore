@@ -1,3 +1,7 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
 # Copied from the root by scripts/build.mjs
 packages/*/LICENSE
 packages/*/NOTICE

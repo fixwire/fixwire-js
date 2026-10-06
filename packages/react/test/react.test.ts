@@ -13,6 +13,8 @@ const { ErrorBoundary, reactErrorHandler, withErrorBoundary } = await import("..
 const { recordsOf, thrown } = await import("../../core/test/helpers.ts");
 
 const { act, createElement: h, useState } = React;
+/** CI runs these tests on React 18 too, where createRoot has no error handlers. */
+const reactMajor = Number(React.version.split(".")[0]);
 
 // biome-ignore lint/suspicious/noExplicitAny: assertions walk the request JSON freely
 type Json = Record<string, any>;
@@ -92,7 +94,9 @@ test("an ErrorBoundary reports what it catches and renders the fallback", async 
   assert.equal(event?.attributes["fixwire.tags"].area, "cart");
 });
 
-test("root handlers report uncaught errors once, even next to a boundary", async () => {
+test("root handlers report uncaught errors once, even next to a boundary", {
+  skip: reactMajor < 19 && "root error handlers arrived in React 19",
+}, async () => {
   setup();
   const container = document.createElement("div");
   const root = createRoot(container, {

@@ -3,6 +3,13 @@
   "version": "0.1.0",
   "description": "Fixwire SDK for React: error boundaries and root error handlers",
   "license": "MIT",
+  "homepage": "https://github.com/fixwire/fixwire-js/tree/main/packages/react#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fixwire/fixwire-js.git",
+    "directory": "packages/react"
+  },
+  "bugs": "https://github.com/fixwire/fixwire-js/issues",
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.js",
