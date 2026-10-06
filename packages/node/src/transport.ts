@@ -1,4 +1,8 @@
-/** HTTP(S) with keep-alive and a timeout; retries are the delivery's job. */
+/**
+ * HTTP(S) with keep-alive and a timeout; retries are the delivery's job. A
+ * redirect is not followed (the key goes to the DSN's host only), and at
+ * most 64 kB of an answer is read.
+ */
 import * as http from "node:http";
 import * as https from "node:https";
 
@@ -6,6 +10,9 @@ import type { Transport, TransportRequest, TransportResponse } from "@fixwire/co
 
 /** True while the SDK creates its own request, so the HTTP integration skips it. */
 export const sdkRequest = { active: false };
+
+/** Bytes of an answer read at most. */
+const MAX_ANSWER = 64 << 10;
 
 export function makeNodeTransport(timeoutMs = 10_000): Transport {
   const agents = {
@@ -30,16 +37,26 @@ export function makeNodeTransport(timeoutMs = 10_000): Transport {
               timeout: timeoutMs,
             },
             (res) => {
-              res.resume(); // drain
-              res.on("end", () =>
+              const answer = (): void =>
                 resolve({
                   status: res.statusCode ?? 0,
                   header: (name) => {
                     const v = res.headers[name.toLowerCase()];
                     return Array.isArray(v) ? (v[0] ?? null) : (v ?? null);
                   },
-                }),
-              );
+                });
+              // The body is drained, but no more than MAX_ANSWER of it is read:
+              // past that the connection goes.
+              let read = 0;
+              res.on("data", (chunk: Buffer) => {
+                read += chunk.length;
+                if (read > MAX_ANSWER) {
+                  res.destroy();
+                  answer();
+                }
+              });
+              res.on("end", answer);
+              res.on("close", answer); // cut off midway: the status is in
             },
           );
         } finally {

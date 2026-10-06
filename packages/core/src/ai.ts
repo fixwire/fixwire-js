@@ -13,17 +13,24 @@
  * repeated identical calls (agent loops) are visible.
  */
 import { getClient } from "./api.ts";
-import { normalize } from "./serialize.ts";
+import { byCodePoint } from "./redact.ts";
+import { ahead, clip, normalize } from "./serialize.ts";
 import {
   getActiveSpan,
+  MAX_AI_CONTENT,
   type Span,
   type SpanAttributes,
   type StartSpanOptions,
   startSpan,
 } from "./tracing.ts";
 
-/** Longest recorded content attribute (characters). */
-export const MAX_AI_CONTENT = 16_384;
+/** Longest recorded content attribute (bytes of UTF-8). */
+export { MAX_AI_CONTENT };
+/**
+ * Content is kept to what redaction reads; the cut to MAX_AI_CONTENT comes
+ * after it, when the span is sent.
+ */
+export const AI_WINDOW = ahead(MAX_AI_CONTENT);
 
 /** Token counts of a model call. */
 export interface TokenUsage {
@@ -105,19 +112,25 @@ export interface EmbeddingsOptions extends ContentOption {
 export const recording = (o: ContentOption): boolean =>
   o.recordContent ?? getClient()?.options.recordAiContent ?? false;
 
-/** JSON with sorted keys, for stable hashes and readable content. */
-function canonical(value: unknown): string {
-  const sort = (v: unknown): unknown => {
-    if (Array.isArray(v)) return v.map(sort);
+/**
+ * JSON with sorted keys, for stable hashes and readable content, written
+ * as the Python SDK writes it (json.dumps with sort_keys): keys in code
+ * point order, strings cut to `limit` bytes, NaN and the infinities as
+ * strings, and numbers under 1e-4 with an exponent of two digits at least.
+ */
+function canonical(value: unknown, limit = MAX_AI_CONTENT): string {
+  const write = (v: unknown): string => {
+    if (Array.isArray(v)) return `[${v.map(write).join(",")}]`;
     if (v && typeof v === "object")
-      return Object.fromEntries(
-        Object.keys(v as object)
-          .sort()
-          .map((k) => [k, sort((v as Record<string, unknown>)[k])]),
-      );
-    return v;
+      return `{${Object.keys(v)
+        .sort(byCodePoint)
+        .map((k) => `${JSON.stringify(k)}:${write((v as Record<string, unknown>)[k])}`)
+        .join(",")}}`;
+    if (typeof v === "number" && v !== 0 && Math.abs(v) < 1e-4)
+      return v.toExponential().replace(/e-(\d)$/, "e-0$1");
+    return JSON.stringify(v) ?? "null";
   };
-  return JSON.stringify(sort(normalize(value, MAX_AI_CONTENT))) ?? "null";
+  return write(normalize(value, limit));
 }
 
 /** FNV-1a 64 of the UTF-8 text, as 16 hex digits (the Python SDK computes the same). */
@@ -130,10 +143,8 @@ export function argumentsHash(value: unknown): string {
   return h.toString(16).padStart(16, "0");
 }
 
-const content = (value: unknown): string => {
-  const s = typeof value === "string" ? value : canonical(value);
-  return s.length > MAX_AI_CONTENT ? `${s.slice(0, MAX_AI_CONTENT - 3)}...` : s;
-};
+const content = (value: unknown): string =>
+  clip(typeof value === "string" ? value : canonical(value, AI_WINDOW), AI_WINDOW);
 
 const maybe = (record: boolean, value: unknown): string | undefined =>
   record && value !== undefined ? content(value) : undefined;

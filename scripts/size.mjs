@@ -1,6 +1,8 @@
 // The browser bundles must stay small, minified and gzipped: the errors path
-// (init + captureException) under 15 KB, and the tracing
-// path (adding browserTracingIntegration and startSpan) under 20 KB.
+// (init + captureException) under 15.9 KB (16,256 bytes: what PROTOCOL.md §13
+// asks of every SDK, such as cutting strings by UTF-8 bytes after redaction,
+// grew it from 15 KB), and the tracing path (adding browserTracingIntegration
+// and startSpan) under 20 KB.
 
 import { gzipSync } from "node:zlib";
 import { build } from "esbuild";
@@ -8,7 +10,7 @@ import { build } from "esbuild";
 const paths = [
   {
     name: "errors path",
-    budget: 15 * 1024,
+    budget: 16_256,
     entry:
       "export { init, captureException, captureMessage, setTag, setUser } from '@fixwire/browser';",
   },

@@ -52,7 +52,11 @@ Without `waitUntil` the handler waits for delivery before returning.
   its own on Vercel Edge; pass it on Cloudflare, as above.
 - **Traces:** each request continues the caller's trace (W3C `traceparent`
   and `tracestate`) and is a segment. `fetch` calls become child spans, and
-  `tracePropagationTargets` decides which hosts receive trace headers.
+  `tracePropagationTargets` decides which hosts receive trace headers:
+  `"example.com"` is that host and its subdomains (`"example.com:8443"` on
+  that port only), a string with `://` a URL prefix, and a RegExp is
+  searched for in the URL without its query and fragment; without the
+  option, none do.
 - **Delivery:** errors and spans travel as OpenTelemetry (OTLP/HTTP JSON),
   gzipped and sent through the runtime's `waitUntil`, after the response, so
   the isolate isn't stopped first.

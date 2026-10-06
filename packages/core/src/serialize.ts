@@ -1,17 +1,56 @@
 /**
- * Turns values into JSON-safe data within limits: strings capped at
- * maxValueLength, containers capped in depth and breadth, cycles cut,
- * undefined properties left out, and everything else (functions, errors,
- * DOM nodes, bigints) described. Objects walked are capped too, so shared
- * references can't make it exponential, and one that throws (a proxy, a
- * getter) is "[Unreadable]".
+ * Turns values into JSON-safe data within limits: strings capped in UTF-8
+ * bytes, containers capped in depth and breadth, cycles cut, undefined
+ * properties left out, and everything else (functions, errors, DOM nodes,
+ * bigints) described. Objects walked are capped too, so shared references
+ * can't make it exponential, and one that throws (a proxy, a getter) is
+ * "[Unreadable]".
+ *
+ * Strings are cut twice: first to what redaction reads (ahead: the part
+ * kept and the next 16 kB, so a secret the cut goes through is found
+ * whole), then, once redacted, to maxValueLength (clipStrings).
  */
 const MAX_DEPTH = 10;
 const MAX_BREADTH = 100;
 const MAX_OBJECTS = 10_000;
 
+/**
+ * At most `limit` bytes of UTF-8 (0: no limit), cut on a character boundary
+ * and ending in "..." (within the limit).
+ */
 export function clip(s: string, limit: number): string {
-  return limit && s.length > limit ? `${s.slice(0, Math.max(0, limit - 3))}...` : s;
+  if (!limit || s.length * 3 <= limit) return s; // a UTF-16 unit is at most 3 bytes
+  let bytes = 0;
+  let keep = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    // A surrogate pair is 4 bytes; a lone surrogate 3, as U+FFFD.
+    if ((c & 0xfc00) === 0xd800 && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+      bytes += 4;
+      i++;
+    } else bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : 3;
+    if (bytes <= limit - 3) keep = i + 1;
+    if (bytes > limit) return s.slice(0, keep) + "...".slice(0, limit);
+  }
+  return s;
+}
+
+/** What redaction reads of a string cut to `limit`: the part kept and the next 16 kB. */
+export const ahead = (limit: number): number => (limit ? limit + (16 << 10) : 0);
+
+/** Every string of JSON-like data, keys too, cut to `limit` bytes, in place. */
+export function clipStrings(v: unknown, limit: number): unknown {
+  if (typeof v === "string") return clip(v, limit);
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    for (const k of Object.keys(o)) {
+      const value = clipStrings(o[k], limit);
+      const key = Array.isArray(o) ? k : clip(k, limit);
+      if (key !== k) delete o[k];
+      o[key] = value;
+    }
+  }
+  return v;
 }
 
 export function normalize(
@@ -56,7 +95,7 @@ export function normalize(
       } catch {
         v = "[Unreadable]";
       }
-      if (v !== undefined) out[key] = next(v);
+      if (v !== undefined) out[clip(key, maxValueLength)] = next(v);
     }
     return out;
   } catch {

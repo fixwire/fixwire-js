@@ -84,6 +84,8 @@ test("the client sends OTLP through fetch with a bearer key; a hidden page, keep
   assert.equal(headers.Authorization, "Bearer publickey");
   assert.equal(headers["Content-Type"], "application/json");
   assert.equal(init.keepalive, false);
+  // A redirect is not followed: the key goes to the DSN's host only.
+  assert.equal(init.redirect, "manual");
   const [event, rejection, leaving] = recordsOf(
     sent.map((s) => asRequest(s.url, s.init)),
   ) as Json[];
@@ -308,7 +310,8 @@ test("breadcrumbs never break the app's fetch or console calls, and stay cheap",
       crumbs.find((c) => c.category === "fetch")?.data?.url,
       "https://api.example/orders",
     );
-    // A large object logged: only what the 1,024-character message keeps is serialized.
+    // A large object logged: only what the message keeps is serialized (the
+    // 1,024 bytes sent and the next 16 kB, which redaction reads).
     let reads = 0;
     const rows = Array.from({ length: 100_000 }, (_, i) => ({
       get i() {
@@ -319,10 +322,40 @@ test("breadcrumbs never break the app's fetch or console calls, and stay cheap",
     console.debug("rows", rows);
     assert.ok(reads < 2_000, `${reads} values read`);
     const logged = crumbs.find((c) => c.category === "console")?.message ?? "";
-    assert.ok(logged.startsWith('rows [{"i":0},{"i":1},') && logged.length <= 1024);
+    assert.ok(logged.startsWith('rows [{"i":0},{"i":1},') && logged.length <= 1024 + (16 << 10));
   } finally {
     g.fetch = saved.fetch;
     console.debug = saved.debug;
     await Fixwire.close();
   }
+});
+
+test("init never throws: a broken DSN leaves the SDK off, a failing integration is skipped", async () => {
+  const warn = console.warn;
+  const warned: string[] = [];
+  console.warn = (...args: unknown[]) => warned.push(args.join(" "));
+  try {
+    const off = Fixwire.init({ dsn: "https://no-key.example", defaultIntegrations: false });
+    assert.equal(off.enabled, false);
+    const on = Fixwire.init({
+      dsn: "https://publickey@ingest.fixwire.example",
+      defaultIntegrations: false,
+      autoSessionTracking: false,
+      transport: Fixwire.makeFetchTransport(async () => new Response("{}")),
+      integrations: [
+        {
+          name: "Broken",
+          setup() {
+            throw new Error("no");
+          },
+        },
+      ],
+    });
+    assert.equal(on.enabled, true);
+  } finally {
+    console.warn = warn;
+    await Fixwire.close();
+  }
+  assert.match(warned[0] ?? "", /not started/);
+  assert.match(warned[1] ?? "", /integration Broken failed/);
 });

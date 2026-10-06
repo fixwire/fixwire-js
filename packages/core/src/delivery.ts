@@ -3,24 +3,39 @@
  * queue policy, retries with backoff and rate limits. The client feeds it
  * time and HTTP outcomes; it never sets timers itself.
  *
- * Retries (sdks/PROTOCOL.md §2): network errors, 429 and 5xx, with
- * exponential backoff and jitter from 1 s to 5 min, never sooner than the
- * server's Retry-After, up to 6 attempts. Other 4xx answers drop the
- * request. Fixwire-Rate-Limits pauses kinds of data: their requests wait
- * in the (bounded) queue until the pause ends, while the rest keeps flowing.
- * Both pauses are capped at an hour.
+ * Bounds (sdks/PROTOCOL.md §13): a request is sent at most 4 times in all:
+ * again after no answer or a 5xx (about 1 s, then twice as long each time,
+ * never sooner than Retry-After) and after a 429's pause. One whose next
+ * try would be more than 5 minutes away is dropped. Retry-After (seconds
+ * or an HTTP date) and Fixwire-Rate-Limits pause from 0 to a day: a 429
+ * without Fixwire-Rate-Limits pauses everything for Retry-After, a minute
+ * at least, and a 5xx with Retry-After everything for that long. Other
+ * answers drop the request. At most maxQueue requests wait to be sent, and
+ * as many for a retry; past that, new ones are dropped.
  */
 
 export const BACKOFF_BASE = 1;
-export const BACKOFF_MAX = 300;
-export const MAX_ATTEMPTS = 6;
+/** A request whose next try would be further away (seconds) is dropped. */
+export const MAX_WAIT = 300;
+/** Sends of one request in all, 429s included. */
+export const MAX_ATTEMPTS = 4;
 const DEFAULT_RETRY_AFTER = 60;
-/** The longest pause a server can ask for (seconds): past 24.8 days timers fire at once. */
-const MAX_RETRY_AFTER = 3600;
+/** The longest pause a server can ask for: a day (seconds). */
+const MAX_PAUSE = 86_400;
+/** The kinds of data a pause may name (sdks/PROTOCOL.md §2); "" is all of them. */
+const CATEGORIES = ["", "error", "log", "span", "session", "check_in", "feedback", "file"];
 
-/** Seconds from a header, within [0, MAX_RETRY_AFTER]; 0 when it isn't a number. */
-const seconds = (v: string | null): number =>
-  Math.min(Math.max(Number(v) || 0, 0), MAX_RETRY_AFTER);
+/** Whole seconds from a header, at most a day; undefined when broken. */
+const seconds = (v: string): number | undefined =>
+  /^\s*\d+\s*$/.test(v) ? Math.min(Number(v), MAX_PAUSE) : undefined;
+
+/** Retry-After, seconds or an HTTP date, as seconds from `now` (at most a day); undefined when missing or broken. */
+export function retryAfter(v: string | null, now: number): number | undefined {
+  if (!v) return undefined;
+  const s = seconds(v);
+  const at = /^\s*[a-z]/i.test(v) ? Date.parse(v) / 1000 : Number.NaN;
+  return s ?? (Number.isNaN(at) ? undefined : Math.min(Math.max(at - now, 0), MAX_PAUSE));
+}
 
 /** One request to the ingest, as queued, retried and kept offline. */
 export interface Outbound {
@@ -45,16 +60,19 @@ export interface Decision {
   reason?: string;
 }
 
-/** Fixwire-Rate-Limits to {category: until}; "" means every category. */
+/**
+ * Fixwire-Rate-Limits to {category: until}; "" means every category.
+ * Broken parts and categories that aren't the protocol's are left out.
+ */
 export function parseRateLimits(header: string, now: number): Record<string, number> {
   const out: Record<string, number> = {};
   for (const limit of header.split(",")) {
     const [secs = "", cats = ""] = limit.trim().split(":");
-    if (secs === "" || !Number.isFinite(Number(secs))) continue;
     const n = seconds(secs);
+    if (n === undefined) continue;
     for (const c of cats.split(";")) {
       const k = c.trim();
-      out[k] = Math.max(out[k] ?? 0, now + n);
+      if (CATEGORIES.includes(k)) out[k] = Math.max(out[k] ?? 0, now + n);
     }
   }
   return out;
@@ -69,22 +87,27 @@ export class Delivery {
   private readonly maxBytes: number;
   private readonly rng: () => number;
 
-  constructor(maxItems = 64, maxBytes = 8 << 20, rng: () => number = Math.random) {
+  constructor(maxItems = 100, maxBytes = 8 << 20, rng: () => number = Math.random) {
     this.maxItems = maxItems;
     this.maxBytes = maxBytes;
     this.rng = rng;
   }
 
-  /** Queues a request; the oldest go when the queue is full. */
-  offer(item: Outbound): void {
+  /** Queues a new request; false (it is dropped) when maxItems wait already, or their bytes are too many. */
+  offer(item: Outbound): boolean {
+    if (
+      this.waiting(false) >= this.maxItems ||
+      (this.queue.length > 0 && this.bytes + size(item) > this.maxBytes)
+    )
+      return false;
     this.queue.push(item);
     this.bytes += size(item);
-    while (
-      this.queue.length > this.maxItems ||
-      (this.bytes > this.maxBytes && this.queue.length > 1)
-    ) {
-      this.bytes -= size(this.queue.shift() as Outbound);
-    }
+    return true;
+  }
+
+  /** Requests waiting for their first send (false) or for a retry (true). */
+  private waiting(retries: boolean): number {
+    return this.queue.filter((i) => i.attempts > 0 === retries).length;
   }
 
   /** When a request may go: after its backoff and its kind's pause. */
@@ -92,12 +115,17 @@ export class Delivery {
     return Math.max(item.notBefore, this.limits[""] ?? 0, this.limits[item.category] ?? 0);
   }
 
+  /** The next request due, if any; those that would wait past MAX_WAIT are dropped. */
   next(now: number): Outbound | undefined {
-    const i = this.queue.findIndex((item) => this.due(item) <= now);
-    if (i < 0) return undefined;
-    const [item] = this.queue.splice(i, 1) as [Outbound];
-    this.bytes -= size(item);
-    return item;
+    for (let i = 0; i < this.queue.length; i++) {
+      const item = this.queue[i] as Outbound;
+      const due = this.due(item);
+      if (due > now && due - now <= MAX_WAIT) continue;
+      this.queue.splice(i--, 1);
+      this.bytes -= size(item);
+      if (due <= now) return item;
+    }
+    return undefined;
   }
 
   wakeAt(): number | undefined {
@@ -112,17 +140,20 @@ export class Delivery {
     header: (name: string) => string | null,
     now: number,
   ): Decision {
-    const retryAfter = seconds(header("retry-after"));
+    const after = retryAfter(header("retry-after"), now);
     const limits = header("fixwire-rate-limits");
+    const pause = (c: string, until: number): void => {
+      this.limits[c] = Math.max(this.limits[c] ?? 0, until);
+    };
     if (limits) {
-      for (const [c, until] of Object.entries(parseRateLimits(limits, now)))
-        this.limits[c] = Math.max(this.limits[c] ?? 0, until);
+      for (const [c, until] of Object.entries(parseRateLimits(limits, now))) pause(c, until);
     } else if (status === 429) {
-      this.limits[""] = now + (retryAfter || DEFAULT_RETRY_AFTER);
+      pause("", now + Math.max(after ?? 0, DEFAULT_RETRY_AFTER));
     }
+    if (status >= 500 && after !== undefined) pause("", now + after);
     if (status >= 200 && status < 300) return { sent: true };
     if (status === 429 || status >= 500)
-      return this.retry(item, now, `status ${status}`, now + retryAfter);
+      return this.retry(item, now, `status ${status}`, after ?? 0);
     return { dropped: true, reason: `status ${status}` };
   }
 
@@ -130,11 +161,12 @@ export class Delivery {
     return this.retry(item, now, reason, 0);
   }
 
-  private retry(item: Outbound, now: number, reason: string, notBefore: number): Decision {
-    item.attempts++;
-    if (item.attempts >= MAX_ATTEMPTS) return { dropped: true, reason };
-    const delay = Math.min(BACKOFF_MAX, BACKOFF_BASE * 2 ** (item.attempts - 1));
-    item.notBefore = Math.max(notBefore, now + delay * (0.5 + this.rng() / 2));
+  private retry(item: Outbound, now: number, reason: string, wait: number): Decision {
+    // The last send, a next try too far away, or too many waiting already.
+    const delay = Math.max(wait, BACKOFF_BASE * 2 ** item.attempts * (0.5 + this.rng() / 2));
+    if (++item.attempts >= MAX_ATTEMPTS || delay > MAX_WAIT || this.waiting(true) >= this.maxItems)
+      return { dropped: true, reason };
+    item.notBefore = now + delay;
     this.queue.unshift(item);
     this.bytes += size(item);
     return { retry: true, reason };

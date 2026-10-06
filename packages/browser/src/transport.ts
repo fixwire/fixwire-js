@@ -37,6 +37,8 @@ export function makeFetchTransport(
           keepalive,
           referrerPolicy: "strict-origin",
           credentials: "omit",
+          // The key is for the ingest: a redirect isn't followed (it's dropped).
+          redirect: "manual",
         });
         return { status: res.status, header: (name) => res.headers.get(name) };
       } finally {

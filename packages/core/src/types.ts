@@ -169,9 +169,10 @@ export interface EventHint {
 export type StackLineParserFn = (line: string) => StackFrame | undefined;
 /** A stack line parser with its priority (lower runs first). */
 export type StackLineParser = [number, StackLineParserFn];
-/** Turns an `Error.stack` into frames, oldest first. */
+/** Turns an `Error.stack` into frames, oldest first: at most `limit` (default 100), the newest. */
 export type StackParser = (
   stack: string,
   skipFirstLines?: number,
   framesToPop?: number,
+  limit?: number,
 ) => StackFrame[];

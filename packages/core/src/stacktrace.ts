@@ -2,7 +2,7 @@
 // own API frames are stripped, Vue helpers dropped.
 import type { StackFrame, StackLineParser, StackParser } from "./types.ts";
 
-const STACKTRACE_FRAME_LIMIT = 50;
+const STACKTRACE_FRAME_LIMIT = 100;
 export const UNKNOWN_FUNCTION = "?";
 // Used to sanitize webpack (error: *) wrapped stack errors
 const WEBPACK_ERROR_REGEXP = /\(error: (.*)\)/;
@@ -10,12 +10,18 @@ const STRIP_FRAME_REGEXP = /captureMessage|captureException/;
 
 /**
  * Creates a stack parser with the supplied line parsers. Frames come out
- * oldest first, with our own frames removed from the top and bottom.
+ * oldest first, with our own frames removed from the top and bottom: at
+ * most `limit`, the newest.
  */
 export function createStackParser(...parsers: StackLineParser[]): StackParser {
   const sortedParsers = parsers.sort((a, b) => a[0] - b[0]).map((p) => p[1]);
 
-  return (stack: string, skipFirstLines: number = 0, framesToPop: number = 0): StackFrame[] => {
+  return (
+    stack: string,
+    skipFirstLines: number = 0,
+    framesToPop: number = 0,
+    limit: number = STACKTRACE_FRAME_LIMIT,
+  ): StackFrame[] => {
     const frames: StackFrame[] = [];
     const lines = stack.split("\n");
 
@@ -47,19 +53,19 @@ export function createStackParser(...parsers: StackLineParser[]): StackParser {
         }
       }
 
-      if (frames.length >= STACKTRACE_FRAME_LIMIT + framesToPop) {
+      // Lines run newest first: the newest frames are kept.
+      if (frames.length >= limit + framesToPop + 2) {
         break;
       }
     }
 
-    return stripSdkFramesAndReverse(frames.slice(framesToPop));
+    return stripSdkFramesAndReverse(frames.slice(framesToPop)).slice(-limit);
   };
 }
 
 /**
- * Removes our frames from the top and bottom of the stack and enforces the
- * frame limit. The input is newest first; the result is oldest first, so the
- * frame that raised is last.
+ * Removes our frames from the top and bottom of the stack. The input is
+ * newest first; the result is oldest first, so the frame that raised is last.
  */
 export function stripSdkFramesAndReverse(stack: ReadonlyArray<StackFrame>): StackFrame[] {
   if (!stack.length) {
@@ -82,7 +88,7 @@ export function stripSdkFramesAndReverse(stack: ReadonlyArray<StackFrame>): Stac
     }
   }
 
-  return localStack.slice(0, STACKTRACE_FRAME_LIMIT).map((frame) => ({
+  return localStack.map((frame) => ({
     ...frame,
     filename: frame.filename || getLastStackFrame(localStack).filename,
     function: frame.function || UNKNOWN_FUNCTION,

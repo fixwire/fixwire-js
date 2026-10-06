@@ -31,7 +31,10 @@ channels, with no `--import` flag and no load order.
 - **Traces:** each request is a segment named after its route; `http`, `https`
   and `fetch` calls become child spans, and `tracePropagationTargets` decides
   which hosts receive trace headers (W3C `traceparent` and `tracestate`;
-  `baggage` passes through). `startSpan()` adds your own; for a
+  `baggage` passes through): `"example.com"` is that host and its
+  subdomains (`"example.com:8443"` on that port only), a string with `://`
+  a URL prefix, and a RegExp is searched for in the URL without its query
+  and fragment; without the option, none do. `startSpan()` adds your own; for a
   server-rendered page, `getTraceMetaTags()` hands the trace to the browser.
 - **AI agents:** `Fixwire.ai.agent`, `ai.chat` and `ai.tool`, and
   `Fixwire.wrapAnthropic(client)` for automatic model-call spans.

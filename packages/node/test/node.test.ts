@@ -492,30 +492,51 @@ test("context lines come only from regular files of a source file's size", async
   const { spawnSync } = await import("node:child_process");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  const { addContextLines } = await import("../src/context-lines.ts");
+  const { addContextLines, cached } = await import("../src/context-lines.ts");
   const dir = mkdtempSync(join(tmpdir(), "fixwire-context-"));
   const small = join(dir, "small.js");
   writeFileSync(small, "a();\nthrow new Error('x');\nb();\n");
+  const largest = join(dir, "largest.js");
+  writeFileSync(largest, "x();\n".repeat(2 << 20)); // 10 MB
   const big = join(dir, "big.js");
-  writeFileSync(big, "x();\n".repeat(1_000_000)); // 5 MB
+  writeFileSync(big, `${"x();\n".repeat(2 << 20)}\n`); // a byte more
   // A frame's path is text a message can fake: a FIFO would block forever,
   // /dev/zero would be read until memory runs out.
   const fifo = join(dir, "fifo");
   const special = process.platform === "win32" ? [] : ["/dev/zero"];
   if (process.platform !== "win32" && spawnSync("mkfifo", [fifo]).status === 0) special.push(fifo);
-  const frames = [small, big, ...special].map((filename) => ({
+  const frames = [small, largest, big, ...special].map((filename) => ({
     filename,
     lineno: 2,
     in_app: true,
   }));
   const event = { exception: { values: [{ type: "Error", stacktrace: { frames } }] } };
   const done = addContextLines(event).then(() => "done");
-  const timeout = new Promise((r) => setTimeout(() => r("timed out"), 3000).unref());
+  const timeout = new Promise((r) => setTimeout(() => r("timed out"), 5000).unref());
   assert.equal(await Promise.race([done, timeout]), "done");
   assert.deepEqual(
     frames.map((f) => (f as { context_line?: string }).context_line),
-    ["throw new Error('x');", ...frames.slice(1).map(() => undefined)],
+    ["throw new Error('x');", "x();", ...frames.slice(2).map(() => undefined)],
   );
+  // The cache keeps 64 files and 32 MB at most.
+  const many = Array.from({ length: 70 }, (_, i) => {
+    const file = join(dir, `f${i}.js`);
+    writeFileSync(file, "a();\nb();\n");
+    return { filename: file, lineno: 1, in_app: true };
+  });
+  await addContextLines({
+    exception: { values: [{ type: "Error", stacktrace: { frames: many } }] },
+  });
+  assert.equal(cached().files, 64);
+  for (let i = 0; i < 4; i++) {
+    const file = join(dir, `large${i}.js`);
+    writeFileSync(file, "x();\n".repeat(2 << 20));
+    const frame = { filename: file, lineno: 1, in_app: true };
+    await addContextLines({
+      exception: { values: [{ type: "Error", stacktrace: { frames: [frame] } }] },
+    });
+  }
+  assert.ok(cached().bytes <= 32 << 20, `${cached().bytes} bytes`);
 });
 
 test("the file spool is private to its user and sends only to the ingest", async () => {
@@ -572,6 +593,82 @@ test("the file spool is private to its user and sends only to the ingest", async
   } finally {
     rmSync(shared, { force: true });
   }
+});
+
+test("a delivery follows no redirect, and reads at most 64 kB of an answer", async () => {
+  const { makeNodeTransport } = await import("../src/transport.ts");
+  const elsewhere: string[] = [];
+  const other = createServer((req, res) => {
+    elsewhere.push(String(req.headers.authorization));
+    res.end();
+  });
+  await new Promise<void>((r) => other.listen(0, "127.0.0.1", r));
+  const otherPort = (other.address() as { port: number }).port;
+  let written = 0;
+  const server = createServer((req, res) => {
+    req.resume();
+    if (req.url === "/v1/logs") {
+      res.writeHead(307, { location: `http://127.0.0.1:${otherPort}/v1/logs` }).end();
+      return;
+    }
+    // An answer that never ends.
+    res.writeHead(200);
+    const flood = setInterval(() => {
+      written += 16 << 10;
+      res.write(Buffer.alloc(16 << 10));
+    }, 1);
+    res.on("close", () => clearInterval(flood));
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as { port: number }).port;
+  const transport = makeNodeTransport(5000);
+  const send = (path: string) =>
+    transport.send({
+      url: `http://127.0.0.1:${port}${path}`,
+      body: "{}",
+      headers: { Authorization: "Bearer key" },
+    });
+  assert.equal((await send("/v1/logs")).status, 307);
+  const started = Date.now();
+  assert.equal((await send("/v1/traces")).status, 200);
+  assert.ok(Date.now() - started < 2000, `${Date.now() - started} ms`);
+  assert.ok(written < 1 << 20, `${written} bytes written`);
+  assert.deepEqual(elsewhere, []);
+  server.closeAllConnections();
+  server.close();
+  other.close();
+  // The client drops what a redirect answers, without a retry.
+  const statuses: number[] = [];
+  const client = new Fixwire.Client(
+    {
+      dsn: "http://pk@127.0.0.1:1",
+      transport: {
+        send: async () => {
+          statuses.push(302);
+          return { status: 302, header: () => null };
+        },
+      },
+    },
+    Fixwire.nodePlatform(),
+  );
+  client.captureMessage("moved");
+  assert.ok(await client.flush(2000));
+  assert.deepEqual(statuses, [302]);
+});
+
+test("init never throws: a broken DSN leaves the SDK off", async () => {
+  const warn = console.warn;
+  const warned: unknown[] = [];
+  console.warn = (...args: unknown[]) => warned.push(args.join(" "));
+  try {
+    const client = Fixwire.init({ dsn: "not a dsn", defaultIntegrations: false });
+    assert.equal(client.enabled, false);
+    assert.equal(Fixwire.captureMessage("nothing"), undefined);
+  } finally {
+    console.warn = warn;
+    await Fixwire.close();
+  }
+  assert.match(String(warned[0]), /not started/);
 });
 
 test("a delivery whose answer trickles in is cut off at the timeout", async () => {

@@ -20,8 +20,12 @@ The DSN carries the project's publishable key, which is safe in a bundle.
 - **Traces (opt-in):** `tracesSampleRate` plus
   `integrations: [Fixwire.browserTracingIntegration()]` traces page loads,
   route changes and fetch calls, with web vitals. Same-origin requests carry
-  trace headers (W3C `traceparent`) by default, and a server-rendered page's
-  `<meta name="traceparent">` continues the server's trace.
+  trace headers (W3C `traceparent`) by default; `tracePropagationTargets`
+  names others instead: `"/api"` (paths on the page's own origin),
+  `"example.com"` (that host and its subdomains), a URL prefix with `://`, or
+  a RegExp searched for in the URL without its query and fragment. A
+  server-rendered page's `<meta name="traceparent">` continues the server's
+  trace.
 - **Offline (opt-in):** `offline: makeIndexedDbSpool` from
   `@fixwire/browser/offline` keeps events in IndexedDB until they are sent;
   a closing page's last ones go out with `keepalive`.

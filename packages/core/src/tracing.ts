@@ -14,11 +14,36 @@
  */
 import { getClient } from "./api.ts";
 import type { ClientOptions } from "./client.ts";
-import { nanos } from "./otlp.ts";
+import { keyValues, nanos } from "./otlp.ts";
+import type { Redactor } from "./redact.ts";
 import { getCurrentScope, getIsolationScope, withScope } from "./scope.ts";
+import { ahead, clip } from "./serialize.ts";
 
 /** Spans kept per segment; past it they're dropped and counted. */
 export const MAX_SPANS_PER_SEGMENT = 1000;
+/** Attributes kept per span; past it new ones are dropped. */
+export const MAX_ATTRIBUTES = 128;
+/** Recorded AI content: these attributes are kept to MAX_AI_CONTENT bytes instead of maxValueLength. */
+export const MAX_AI_CONTENT = 16_384;
+export const AI_CONTENT = new Set([
+  "gen_ai.input.messages",
+  "gen_ai.output.messages",
+  "gen_ai.system_instructions",
+  "gen_ai.tool.call.arguments",
+  "gen_ai.tool.call.result",
+]);
+/** Spans in one request. */
+const MAX_SPANS_PER_REQUEST = 100;
+
+/** Attributes' keys and string values cut to `size(limit)`, AI content to `size(MAX_AI_CONTENT)`. */
+function cut(a: Record<string, unknown>, limit: number, size: (limit: number) => number): void {
+  for (const k of Object.keys(a)) {
+    const v = a[k];
+    delete a[k];
+    a[clip(k, size(limit))] =
+      typeof v === "string" ? clip(v, size(AI_CONTENT.has(k) ? MAX_AI_CONTENT : limit)) : v;
+  }
+}
 
 /** What a span attribute may hold. */
 export type SpanAttributeValue = string | number | boolean;
@@ -79,7 +104,8 @@ export type HeaderSource =
   | { get(name: string): string | null | undefined }
   | Record<string, string | string[] | undefined>;
 
-const TRACEPARENT = /^\s*00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})\s*$/;
+/** W3C's traceparent, version 00: exactly four fields, lower-case hex. */
+const TRACEPARENT = /^[ \t]*00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})[ \t]*$/;
 
 const perf = (globalThis as { performance?: { timeOrigin?: number; now(): number } }).performance;
 /** Unix seconds with sub-millisecond precision where the runtime has a monotonic clock. */
@@ -125,11 +151,16 @@ function header(headers: HeaderSource, name: string): string | undefined {
 }
 
 /**
- * A caller's tracestate or baggage, to pass on: within the W3C size limit
- * (8192) and printable ASCII, so it can't oversize or break outgoing requests.
+ * A caller's tracestate (at most 512 bytes) or baggage (8192), to pass on
+ * whole: a longer one, or one with a control character but tab (W3C's list
+ * whitespace), is not passed on at all, so it can't oversize or break
+ * outgoing requests.
  */
-const passable = (v: string | undefined): string | undefined =>
-  v && v.length <= 8192 && /^[\t -~]*$/.test(v) ? v : undefined;
+const passable = (v: string | undefined, limit: number): string | undefined =>
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what it looks for
+  v && new TextEncoder().encode(v).length <= limit && !/[\0-\b\n-\x1f\x7f-\x9f]/.test(v)
+    ? v
+    : undefined;
 
 /** The trace of incoming headers (traceparent, tracestate, baggage), or a new one. */
 export function propagationFromHeaders(headers: HeaderSource): PropagationContext {
@@ -141,9 +172,9 @@ export function propagationFromHeaders(headers: HeaderSource): PropagationContex
     ctx.parentSpanId = m[2];
     ctx.sampled = (Number.parseInt(m[3] as string, 16) & 1) === 1;
     ctx.sampleRand = randOf(ctx.traceId);
-    ctx.tracestate = passable(header(headers, "tracestate"));
+    ctx.tracestate = passable(header(headers, "tracestate"), 512);
   }
-  ctx.baggage = passable(header(headers, "baggage"));
+  ctx.baggage = passable(header(headers, "baggage"), 8192);
   return ctx;
 }
 
@@ -199,6 +230,7 @@ export class Span {
   readonly startTime: number;
   endTime: number | undefined;
   readonly attributes: Record<string, SpanAttributeValue> = {};
+  private attributeCount = 0;
   private readonly buffer: Span[] = [];
   private dropped = 0;
   private open = 0;
@@ -239,9 +271,14 @@ export class Span {
     return this.sampled && this.endTime === undefined;
   }
 
-  /** An attribute (null and undefined are ignored). */
+  /** An attribute (null and undefined are ignored; past MAX_ATTRIBUTES, new keys are). */
   setAttribute(key: string, value: SpanAttributeValue | null | undefined): this {
-    if (value !== null && value !== undefined) this.attributes[key] = value;
+    if (
+      value !== null &&
+      value !== undefined &&
+      (Object.hasOwn(this.attributes, key) || this.attributeCount++ < MAX_ATTRIBUTES)
+    )
+      this.attributes[key] = value;
     return this;
   }
 
@@ -289,6 +326,41 @@ export class Span {
   /** A finished segment's spans, itself first. */
   spans(): Span[] {
     return [this, ...this.buffer];
+  }
+
+  /**
+   * A finished segment's spans as OTLP, itself first, in batches of at most
+   * MAX_SPANS_PER_REQUEST spans and `room` bytes of JSON; a span that can't
+   * fit is left out. Names and attributes (URLs, queries, messages, and
+   * their keys) are cut to what redaction reads, masked, then cut to `limit`
+   * bytes, AI content to MAX_AI_CONTENT. (Here rather than in the client,
+   * so pages that don't trace don't ship it.)
+   */
+  batches(limit: number, redactor: Redactor | undefined, room: number): object[][] {
+    const out: object[][] = [];
+    let batch: object[] = [];
+    let bytes = 0;
+    for (const s of this.spans()) {
+      const j = s.toJSON();
+      cut(j.attributes, limit, ahead);
+      if (redactor) {
+        redactor.walk(j.attributes);
+        j.name = redactor.mask(clip(j.name, ahead(limit)))[0];
+      }
+      cut(j.attributes, limit, (n) => n);
+      const span = { ...j, name: clip(j.name, limit), attributes: keyValues(j.attributes) };
+      const n = new TextEncoder().encode(JSON.stringify(span)).length + 1;
+      if (n > room) continue;
+      if (batch.length === MAX_SPANS_PER_REQUEST || bytes + n > room) {
+        out.push(batch);
+        batch = [];
+        bytes = 0;
+      }
+      batch.push(span);
+      bytes += n;
+    }
+    if (batch.length) out.push(batch);
+    return out;
   }
 
   /** W3C `traceparent` value for this span. */
@@ -503,18 +575,43 @@ export function getTraceMetaTags(): string {
     .join("\n");
 }
 
+const DEFAULT_PORTS: Record<string, string> = {
+  "http:": "80",
+  "https:": "443",
+  "ws:": "80",
+  "wss:": "443",
+};
+
 /**
- * Whether trace headers may go to `url`: it matches tracePropagationTargets
- * (a string anywhere in the URL, or a RegExp). Without the option: requests
- * to the page's own origin in browsers, none elsewhere.
+ * Whether trace headers may go to `url` (tracePropagationTargets), compared
+ * without its user info, query and fragment: a target with "://" matches
+ * URLs starting with it; one starting with "/" requests to the page's own
+ * origin whose path starts with it; any other is a host, with a port if it
+ * has one, matching that host and its subdomains; a RegExp is searched for.
+ * Without the option: requests to the page's own origin in browsers, none
+ * elsewhere.
  */
 export function shouldPropagate(url: string): boolean {
   const targets = getClient()?.options.tracePropagationTargets;
-  if (targets === undefined) {
-    const origin = (globalThis as { location?: { origin?: string } }).location?.origin;
-    if (!origin) return false;
-    // A path, not "//host" or "/\host" (browsers read both as another host).
-    return url.startsWith(`${origin}/`) || url === origin || /^\/(?![/\\])/.test(url);
+  const origin = (globalThis as { location?: { origin?: string } }).location?.origin;
+  let u: URL;
+  try {
+    // A path is the page's ("//host" and "/\host" are other hosts, as browsers read them).
+    u = new URL(url, origin);
+  } catch {
+    return false; // relative, outside a page
   }
-  return targets.some((t) => (typeof t === "string" ? url.includes(t) : t.test(url)));
+  const own = !!origin && u.origin === origin;
+  if (!targets) return own;
+  const compared = `${u.protocol}//${u.host}${u.pathname}`;
+  const host = u.hostname.toLowerCase();
+  const port = u.port || DEFAULT_PORTS[u.protocol];
+  return targets.some((t) => {
+    if (typeof t !== "string") return compared.search(t) >= 0;
+    if (t.includes("://")) return compared.startsWith(t);
+    if (t.startsWith("/")) return own && u.pathname.startsWith(t);
+    const lower = t.toLowerCase();
+    const [, name = lower, wanted] = /^(\[.*\]|[^:]*)(?::(\d+))?$/.exec(lower) ?? [];
+    return !!name && (!wanted || wanted === port) && (host === name || host.endsWith(`.${name}`));
+  });
 }

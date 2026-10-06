@@ -71,13 +71,18 @@ export const breadcrumbsIntegration = (): Integration => ({
         if (typeof original !== "function") continue;
         g.console[level] = function fixwireWrapped(this: Console, ...args: unknown[]) {
           try {
-            getClient()?.addBreadcrumb({
+            // What is logged while the SDK captures, and its own lines, the
+            // client skips. The message is kept to what redaction reads
+            // (the part sent and the next 16 kB): the cut comes after it.
+            const client = getClient();
+            const max = (client?.options.maxValueLength ?? 1024) + (16 << 10);
+            client?.addBreadcrumb({
               category: "console",
               level: level === "warn" ? "warning" : level === "log" ? "info" : level,
               message: args
-                .map((a) => (typeof a === "string" ? a : safeString(a)))
+                .map((a) => (typeof a === "string" ? a : safeString(a, max)))
                 .join(" ")
-                .slice(0, 1024),
+                .slice(0, max),
             });
           } catch {
             // never break logging
@@ -135,15 +140,15 @@ function crumb(
 }
 
 /**
- * A logged value as JSON. Only its first values and characters: the message
- * keeps 1024 characters, so logging a large object stays cheap.
+ * A logged value as JSON. Only its first values and `max` characters of
+ * each string, so logging a large object stays cheap.
  */
-function safeString(v: unknown): string {
+function safeString(v: unknown, max: number): string {
   let budget = 1000;
   try {
     return (
       JSON.stringify(v, (_k, x: unknown) =>
-        --budget < 0 ? undefined : typeof x === "string" ? x.slice(0, 1024) : x,
+        --budget < 0 ? undefined : typeof x === "string" ? x.slice(0, max) : x,
       ) ?? String(v)
     );
   } catch {

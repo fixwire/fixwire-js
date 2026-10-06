@@ -164,10 +164,15 @@ test("capturing never throws into the app, whatever was thrown", async () => {
 
 test("captures waiting to be encoded are bounded", async () => {
   // Check-ins, feedback and spans have no budget: a burst outran encoding without limit.
+  // As many wait as the delivery queue holds (maxQueue, default 100).
   const { client } = fakeClient({});
   for (let i = 0; i < 5_000; i++) client.captureCheckIn({ monitorSlug: "job", status: "ok" });
-  assert.equal((client as unknown as { queue: unknown[] }).queue.length, 1_000);
+  assert.equal((client as unknown as { queue: unknown[] }).queue.length, 100);
   await client.close(2000);
+  const small = fakeClient({ maxQueue: 7 }).client;
+  for (let i = 0; i < 50; i++) small.captureCheckIn({ monitorSlug: "job", status: "ok" });
+  assert.equal((small as unknown as { queue: unknown[] }).queue.length, 7);
+  await small.close(2000);
 });
 
 test("budgets fold repeats into the next event's fixwire.suppressed", async () => {

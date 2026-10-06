@@ -21,7 +21,7 @@ export class Scope {
   user: User | undefined;
   level: SeverityLevel | undefined;
   fingerprint: string[] | undefined;
-  breadcrumbs: Breadcrumb[] = [];
+  private crumbs: Breadcrumb[] = [];
   processors: EventProcessor[] = [];
   maxBreadcrumbs = 100;
   /** The active span (current scopes): startSpan sets it for its callback. */
@@ -40,7 +40,7 @@ export class Scope {
     s.user = this.user ? { ...this.user } : undefined;
     s.level = this.level;
     s.fingerprint = this.fingerprint ? [...this.fingerprint] : undefined;
-    s.breadcrumbs = [...this.breadcrumbs];
+    s.crumbs = this.breadcrumbs;
     s.processors = [...this.processors];
     s.maxBreadcrumbs = this.maxBreadcrumbs;
     s.span = this.span;
@@ -50,7 +50,11 @@ export class Scope {
 
   /** A searchable key/value (the value becomes a string). */
   setTag(key: string, value: unknown): this {
-    this.tags[key] = String(value);
+    try {
+      this.tags[key] = String(value);
+    } catch {
+      // a value whose toString throws is not a tag
+    }
     return this;
   }
 
@@ -91,15 +95,23 @@ export class Scope {
     return this;
   }
 
+  /** The last maxBreadcrumbs breadcrumbs, oldest first. */
+  get breadcrumbs(): Breadcrumb[] {
+    return this.maxBreadcrumbs > 0 ? this.crumbs.slice(-this.maxBreadcrumbs) : [];
+  }
+
+  set breadcrumbs(crumbs: Breadcrumb[]) {
+    this.crumbs = crumbs;
+  }
+
+  /** Amortized constant time: the oldest go in one cut, once twice as many are kept. */
   addBreadcrumb(crumb: Breadcrumb): this {
-    this.breadcrumbs.push(crumb);
-    if (this.breadcrumbs.length > this.maxBreadcrumbs)
-      this.breadcrumbs.splice(0, this.breadcrumbs.length - this.maxBreadcrumbs);
+    if (this.crumbs.push(crumb) >= 2 * this.maxBreadcrumbs) this.crumbs = this.breadcrumbs;
     return this;
   }
 
   clearBreadcrumbs(): this {
-    this.breadcrumbs = [];
+    this.crumbs = [];
     return this;
   }
 

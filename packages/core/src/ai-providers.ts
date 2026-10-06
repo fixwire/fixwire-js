@@ -9,12 +9,12 @@
  * the cached ones, which are also reported on their own.
  */
 import {
+  AI_WINDOW,
   type ChatResponse,
   ChatSpan,
   chatSpanOptions,
   embeddingsSpanOptions,
   failed,
-  MAX_AI_CONTENT,
   recording,
   type TokenUsage,
 } from "./ai.ts";
@@ -37,14 +37,15 @@ const str = (v: unknown): string | undefined => (typeof v === "string" ? v : und
 
 /**
  * A streamed answer's text, for its recorded output: kept only when it is
- * recorded, and only as much as is (a long stream holds no more memory).
+ * recorded, and only as much as redaction reads of it (a long stream holds
+ * no more memory).
  */
 function streamedText(keep: boolean): { add(text: unknown): void; output(): unknown } {
   const parts: string[] = [];
   let size = 0;
   return {
     add(text) {
-      if (keep && typeof text === "string" && size <= MAX_AI_CONTENT) {
+      if (keep && typeof text === "string" && size <= AI_WINDOW) {
         parts.push(text);
         size += text.length;
       }

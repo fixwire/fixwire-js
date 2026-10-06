@@ -199,3 +199,17 @@ test("deliveries follow no redirect and time out; a fetch the SDK can't read sti
   assert.ok(downstream.got.some((r) => r.url.endsWith("/stock")));
   await Fixwire.close();
 });
+
+test("init never throws: a broken DSN leaves the SDK off", async () => {
+  const warn = console.warn;
+  const warned: string[] = [];
+  console.warn = (...args: unknown[]) => warned.push(args.join(" "));
+  try {
+    const client = Fixwire.init({ dsn: "no dsn", asyncLocalStorage: AsyncLocalStorage });
+    assert.equal(client.enabled, false);
+  } finally {
+    console.warn = warn;
+    await Fixwire.close();
+  }
+  assert.match(warned[0] ?? "", /not started/);
+});

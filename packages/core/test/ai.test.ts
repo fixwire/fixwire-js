@@ -184,6 +184,35 @@ test("argument hashes ignore key order and match the Python SDK", () => {
   assert.notEqual(argumentsHash({ id: 1 }), argumentsHash({ id: 2 }));
   // FNV-1a 64 of '{"id":"ord_1"}' (the Python SDK's test checks the same value).
   assert.equal(argumentsHash({ id: "ord_1" }), "e665776feba25695");
+  // Values from the Python SDK's arguments_hash: strings cut at 16 kB of
+  // UTF-8, keys in code point order, NaN and the infinities as strings,
+  // small numbers with Python's exponent.
+  for (const [value, hash] of [
+    ["é".repeat(9000), "64715d9755826399"],
+    ["😀".repeat(5000), "34cdd5172f496434"],
+    [{ "￿": 1, "😀": 2, a: 3, Z: 4, é: 5, "": 6 }, "4861fa96bf28595f"],
+    [
+      [
+        0,
+        -1,
+        2 ** 53,
+        1.5,
+        0.1,
+        1e-5,
+        1.5e-7,
+        -2.5e-10,
+        123456.789,
+        1e-4,
+        0.0001234,
+        3.14159e-100,
+        -7,
+      ],
+      "ac7f6ce6ab7edfe7",
+    ],
+    [[Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY], "e3b44446d407a015"],
+    [{ ["k".repeat(17_000)]: "long key" }, "f1b57e73eb9fb945"],
+  ] as const)
+    assert.equal(argumentsHash(value), hash, JSON.stringify(value).slice(0, 40));
 });
 
 test("a failed or abandoned model call still ends its span", async () => {

@@ -487,10 +487,21 @@ const REGISTRY: Detector[] = [
     validate: credentialLike,
   },
   {
+    // A value given to a secret's name, in text, config and URLs. The name
+    // may end a longer one (access_token, client_secret, csrfToken,
+    // PHPSESSID, X-Amz-Signature); an OAuth code counts in a query or
+    // fragment only.
+    //
+    // Linear although JavaScript backtracks: each name is a few fixed
+    // characters ending in a letter, so a run of spaces is backtracked
+    // into only from the names that end where it starts (a bounded few),
+    // and the spaces after a ":" or "=" only from the names before it.
+    // The value either matches (and the search goes on past it) or fails
+    // within six characters.
     name: "secret_assignment",
-    prefilter: ["pass", "secret", "token", "api_key", "apikey", "api-key", "pwd"],
+    prefilter: ["pass", "pwd", "secret", "key", "token", "credential", "sess", "sig", "code"],
     re: g(
-      `\\b(?:pa${S}${S}word|pa${S}${S}wd|pwd|${S}ecret|to${K}en|api[_-]?${K}ey|acce${S}${S}[_-]?${K}ey)["']?${WS}*[:=]${WS}*["']?([^\\t\\n\\f\\r "',;&]{6,})`,
+      `(?:pa${S}${S}word|pa${S}${S}wd|pwd|${S}ecret(?:[_-]?${K}ey)?|private[_-]?${K}ey|to${K}en|api[_-]?${K}ey|acce${S}${S}[_-]?${K}ey|credential${S}?|${S}e${S}${S}(?:ion)?[_-]?id|${S}ig(?:nature)?|[?&#]code)["']?${WS}*[:=]${WS}*["']?([^\\t\\n\\f\\r "',;&]{6,})`,
       "di",
     ),
     group: 1,
@@ -583,7 +594,7 @@ function overlaps(fs: Finding[], start: number, end: number): boolean {
 }
 
 /** Orders strings like Go and Python do (by code point, not UTF-16 unit). */
-const byCodePoint = (a: string, b: string): number => {
+export const byCodePoint = (a: string, b: string): number => {
   const x = Array.from(a);
   const y = Array.from(b);
   for (let i = 0; i < Math.min(x.length, y.length); i++) {
@@ -648,9 +659,14 @@ export class Redactor {
     return out;
   }
 
-  /** Replaces each finding with [REDACTED:<detector>]. */
+  /** Replaces each finding with [REDACTED:<detector>]; text it fails on is "[Filtered]". */
   mask(s: string): [string, Finding[]] {
-    const fs = this.find(s);
+    let fs: Finding[];
+    try {
+      fs = this.find(s);
+    } catch {
+      return [FILTERED, []]; // never sent unmasked
+    }
     if (!fs.length) return [s, fs];
     let out = "";
     let last = 0;
@@ -715,11 +731,15 @@ export class Redactor {
         o[k] = this.walkInner(val, n);
       }
       // Keys hold data too ({"ada@example.com": 3}). Keys that mask alike
-      // are numbered in key order: "[REDACTED:email] (2)".
+      // are numbered in key order: "[REDACTED:email] (2)", each resuming
+      // from the last number (counting up from 2 for each was quadratic).
+      const next = new Map<string, number>();
       for (const k of renamed.sort(byCodePoint)) {
         const [masked, fs] = this.mask(k);
         let key = masked;
-        for (let i = 2; Object.hasOwn(o, key); i++) key = `${masked} (${i})`;
+        let i = Math.max(next.get(masked) ?? 0, 2);
+        for (; Object.hasOwn(o, key); i++) key = `${masked} (${i})`;
+        next.set(masked, i);
         o[key] = o[k];
         delete o[k];
         n.count += fs.length;

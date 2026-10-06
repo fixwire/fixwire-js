@@ -25,7 +25,9 @@ function fnv(text: string, seed: number): string {
   return h.toString(16).padStart(8, "0");
 }
 
-export const template = (message: string): string => message.replace(NUMBERS, "$1<*>");
+/** A message's shape, from its first 1,024 characters (all the budget reads). */
+export const template = (message: string): string =>
+  message.slice(0, 1024).replace(NUMBERS, "$1<*>");
 
 const where = (filename: string): string =>
   filename

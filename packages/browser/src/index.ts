@@ -68,7 +68,13 @@ export function init(options: BrowserOptions = {}): Client {
     options.defaultIntegrations === false
       ? []
       : [globalHandlersIntegration(), breadcrumbsIntegration()];
-  for (const i of resolveIntegrations(defaults, options.integrations)) i.setup(client);
+  for (const i of resolveIntegrations(defaults, options.integrations)) {
+    try {
+      i.setup(client);
+    } catch (e) {
+      console.warn(`[fixwire] integration ${i?.name} failed:`, e);
+    }
+  }
   // Release health: the page load is a session, ending when the page goes
   // away (or crashing first); a page restored from the back-forward cache
   // starts a new one.

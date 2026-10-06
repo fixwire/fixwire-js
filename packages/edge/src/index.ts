@@ -253,7 +253,13 @@ export function init(options: EdgeOptions = {}): Client {
   const client = new Client(o, edgePlatform());
   bindClient(client);
   const defaults = o.defaultIntegrations === false ? [] : [fetchIntegration()];
-  for (const i of resolveIntegrations(defaults, o.integrations)) i.setup(client);
+  for (const i of resolveIntegrations(defaults, o.integrations)) {
+    try {
+      i.setup(client);
+    } catch (e) {
+      console.warn(`[fixwire] integration ${i?.name} failed:`, e);
+    }
+  }
   return client;
 }
 

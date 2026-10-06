@@ -69,6 +69,14 @@ for (const [name, text] of [
   ["JWT starts without the dots", "eyJ-".repeat(50_000)],
   // Each finding was checked against every earlier one.
   ["thirty thousand findings", "a@b.cc ".repeat(30_000)],
+  // secret_assignment has no word boundary now: a name anywhere, then spaces to backtrack.
+  ["a name and spaces without a value", `token${" ".repeat(100_000)}`],
+  ["a name, '=' and spaces", `token=${" ".repeat(100_000)}x`],
+  ["names run together", "sessid".repeat(50_000)],
+  ["names with empty values", "sessid= ".repeat(30_000)],
+  ["query codes run together", "?code".repeat(50_000)],
+  ["query codes with short values", "?code=ab".repeat(30_000)],
+  ["names that may go on", "secret_key_".repeat(30_000)],
 ]) {
   test(`hostile text is masked in linear time: ${name}`, () => {
     const started = performance.now();
@@ -114,6 +122,27 @@ test("a JWT after hostile text is still found", () => {
   assert.equal(new Redactor().mask(`${hostile} ${jwt}`)[0], `${hostile} [REDACTED:jwt]`);
   // Joined by "-" (a non-word character), the run is one token from its first "eyJ".
   assert.equal(new Redactor().mask(`x ${hostile}${jwt}`)[0], "x [REDACTED:jwt]");
+});
+
+test("keys that mask alike are numbered in linear time", () => {
+  const doc: Record<string, number> = {};
+  for (let i = 0; i < 20_000; i++) doc[`user${i}@example.com`] = i;
+  const started = performance.now();
+  const [out, n] = new Redactor().walk(doc);
+  assert.ok(performance.now() - started < 1000);
+  assert.equal(n, 20_000);
+  assert.equal(Object.keys(out).length, 20_000);
+  assert.ok(Object.hasOwn(out, "[REDACTED:email] (20000)"));
+});
+
+test("text redaction fails on is sent as [Filtered]", () => {
+  const r = new Redactor();
+  (r as unknown as { find(): never }).find = () => {
+    throw new RangeError("Maximum call stack size exceeded");
+  };
+  assert.deepEqual(r.mask("token=abcdefgh"), ["[Filtered]", []]);
+  // Keys are text too.
+  assert.deepEqual(r.walk({ note: "token=abcdefgh" })[0], { "[Filtered]": "[Filtered]" });
 });
 
 test("keys lower-case like the server", () => {

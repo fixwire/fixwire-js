@@ -15,7 +15,13 @@ import { Delivery, type Outbound } from "./delivery.ts";
 import { type Dsn, parseDsn, SDK_VERSION } from "./dsn.ts";
 import { debugImages, eventFromUnknown } from "./eventbuilder.ts";
 import { fingerprint, Limiter, type RateLimitOptions } from "./limiter.ts";
-import { eventRecord, keyValues, logsRequest, type ResourceInfo, tracesRequest } from "./otlp.ts";
+import {
+  eventRecord,
+  type KeyValue,
+  logsRequest,
+  type ResourceInfo,
+  tracesRequest,
+} from "./otlp.ts";
 import { Redactor } from "./redact.ts";
 import {
   applyScopes,
@@ -24,7 +30,7 @@ import {
   getIsolationScope,
   type Scope,
 } from "./scope.ts";
-import { normalize } from "./serialize.ts";
+import { ahead, clip, clipStrings, normalize } from "./serialize.ts";
 import {
   hashIdentity,
   identity,
@@ -43,10 +49,12 @@ import type {
   CheckIn,
   Event,
   EventHint,
+  Exception,
   Feedback,
   Mechanism,
   MonitorConfig,
   SeverityLevel,
+  StackFrame,
   StackParser,
 } from "./types.ts";
 
@@ -110,8 +118,9 @@ export function resolveIntegrations(
   defaults: Integration[],
   custom: Integration[] = [],
 ): Integration[] {
-  const names = new Set(custom.map((i) => i.name));
-  return [...defaults.filter((i) => !names.has(i.name)), ...custom];
+  const own = Array.isArray(custom) ? custom : [];
+  const names = new Set(own.map((i) => i?.name));
+  return [...defaults.filter((i) => !names.has(i.name)), ...own];
 }
 
 /** Options of `init()` and of `new Client()`. */
@@ -130,8 +139,16 @@ export interface ClientOptions {
   sampleRate?: number;
   /** Breadcrumbs kept per scope (default 100). */
   maxBreadcrumbs?: number;
-  /** Longest string kept in an event (default 1024). */
+  /**
+   * Longest string sent, in bytes of UTF-8 (default 1024): longer ones are
+   * cut on a character boundary and end in "...". Recorded AI content gets
+   * 16 kB. Secrets are masked before the cut.
+   */
   maxValueLength?: number;
+  /** Frames sent per error, the newest kept (default 100). */
+  maxStackFrames?: number;
+  /** Requests waiting to be sent, and as many waiting for a retry (default 100); past that, new data is dropped. */
+  maxQueue?: number;
   /**
    * The last word on an event: return it (changed or not), or null to drop
    * it. Runs before redaction, so what it adds is masked too.
@@ -174,9 +191,14 @@ export interface ClientOptions {
    */
   tracesSampler?: (context: SamplingContext) => number | boolean | undefined;
   /**
-   * Outgoing requests whose URL contains one of these strings (or matches
-   * one of these RegExps) carry trace headers. Default: the page's own
-   * origin in browsers, nothing on servers.
+   * Outgoing requests that carry trace headers, by their URL without user
+   * info, query and fragment: a string with "://" matches URLs starting
+   * with it (`"https://api.example.com/v2"`); one starting with "/" requests
+   * to the page's own origin whose path starts with it (browsers); any other
+   * string is a host, with a port if it has one, matching that host and its
+   * subdomains (`"example.com"` matches `api.example.com`, not
+   * `badexample.com`); a RegExp is searched for in the URL. Default: the
+   * page's own origin in browsers, nothing on servers.
    */
   tracePropagationTargets?: (string | RegExp)[];
   /**
@@ -218,10 +240,13 @@ export interface Platform {
   makeSpool?: SpoolFactory;
 }
 
-/** The ingest's limit for one event. */
+/** An error or message is at most this much JSON. */
 const MAX_EVENT_BYTES = 1 << 20;
-/** Captures waiting to be encoded. */
-const MAX_PENDING = 1000;
+/** A request of spans is at most this much JSON. */
+const MAX_REQUEST_BYTES = 5 << 20;
+/** Aggregates in one sessions request. */
+const MAX_AGGREGATES = 5000;
+/** Ids and the app's own configuration: cut, but not redacted. */
 const REDACT_SKIP = [
   "event_id",
   "timestamp",
@@ -234,6 +259,7 @@ const REDACT_SKIP = [
 ] as const;
 
 const now = (): number => Date.now() / 1000;
+const utf8 = (s: string): number => new TextEncoder().encode(s).length;
 
 function uuid4(): string {
   const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
@@ -244,8 +270,8 @@ function uuid4(): string {
   });
 }
 
-/** Encodes something captured into its request, or undefined when it can't be. */
-type Encode = () => Promise<Outbound | undefined>;
+/** Encodes something captured into its requests, or undefined when it can't be. */
+type Encode = () => Promise<Outbound | Outbound[] | undefined>;
 
 /** Request sessions are sent this often (seconds), and on flush. */
 const SESSIONS_INTERVAL = 60;
@@ -260,10 +286,12 @@ export class Client {
   readonly options: ClientOptions;
   readonly dsn: Dsn | undefined;
   readonly platform: Platform;
-  readonly delivery = new Delivery();
-  private readonly limiter: Limiter;
+  readonly delivery: Delivery;
+  private readonly limiter!: Limiter;
   private readonly redactor: Redactor | undefined;
   private readonly transport: Transport | undefined;
+  /** Inside a callback or the SDK's own logging: breadcrumbs logged now are skipped. */
+  private capturing = 0;
   private queue: Encode[] = [];
   private inFlight = 0;
   private pumping = false;
@@ -280,20 +308,39 @@ export class Client {
   constructor(options: ClientOptions, platform: Platform) {
     this.options = options;
     this.platform = platform;
-    this.dsn = options.dsn ? parseDsn(options.dsn) : undefined;
-    this.limiter = new Limiter(options.rateLimit ?? {}, platform.globalPerMinute);
-    this.redactor =
-      options.redact === false ? undefined : new Redactor({ sensitiveKeys: options.sensitiveKeys });
-    this.transport = this.dsn ? (options.transport ?? platform.makeTransport()) : undefined;
-    getIsolationScope().maxBreadcrumbs = options.maxBreadcrumbs ?? 100;
-    const factory = typeof options.offline === "function" ? options.offline : platform.makeSpool;
-    this.spool = this.dsn && options.offline ? factory?.(options, this.dsn) : undefined;
-    if (this.dsn && options.offline && !factory)
-      this.warn(
-        "offline: true needs a store here; pass offline: makeIndexedDbSpool from @fixwire/browser/offline",
-      );
+    this.delivery = new Delivery(options.maxQueue);
+    // A broken DSN or option must not stop the app: the SDK stays off.
+    try {
+      this.dsn = options.dsn ? parseDsn(options.dsn) : undefined;
+      this.limiter = new Limiter(options.rateLimit ?? {}, platform.globalPerMinute);
+      this.redactor =
+        options.redact === false
+          ? undefined
+          : new Redactor({ sensitiveKeys: options.sensitiveKeys });
+      this.transport = this.dsn ? (options.transport ?? platform.makeTransport()) : undefined;
+      getIsolationScope().maxBreadcrumbs = options.maxBreadcrumbs ?? 100;
+      const factory = typeof options.offline === "function" ? options.offline : platform.makeSpool;
+      this.spool = this.dsn && options.offline ? factory?.(options, this.dsn) : undefined;
+      if (this.dsn && options.offline && !factory)
+        this.warn(
+          "offline: true needs a store here; pass offline: makeIndexedDbSpool from @fixwire/browser/offline",
+        );
+    } catch (e) {
+      this.dsn = undefined;
+      console.warn("[fixwire] not started:", e instanceof Error ? e.message : e);
+    }
     // Deliver what an earlier run left.
     if (this.spool) this.schedule();
+  }
+
+  /** The longest string sent (bytes of UTF-8). */
+  private get limit(): number {
+    return this.options.maxValueLength ?? 1024;
+  }
+
+  /** Frames sent per error. */
+  private get maxFrames(): number {
+    return this.options.maxStackFrames || 100;
   }
 
   /** False without a DSN or after close(): captures are then no-ops. */
@@ -327,7 +374,8 @@ export class Client {
         exception,
         { ...hint, syntheticException },
         mechanism,
-        this.options.maxValueLength ?? 1024,
+        ahead(this.limit),
+        this.maxFrames,
       );
     } catch (e) {
       this.warn("could not prepare an event", e);
@@ -361,13 +409,16 @@ export class Client {
   /** Sends an event you built. Returns its id, or undefined when dropped. */
   captureEvent(event: Event, hint: EventHint = {}): string | undefined {
     if (!this.enabled) return undefined;
-    this.markSession(event);
     let prepared: Event | null;
+    this.capturing++;
     try {
+      this.markSession(event);
       prepared = this.prepare(event, hint);
     } catch (e) {
       this.warn("could not prepare an event", e);
       return undefined;
+    } finally {
+      this.capturing--;
     }
     if (!prepared) return undefined;
     this.enqueue(() => this.encodeEvent(prepared));
@@ -386,7 +437,7 @@ export class Client {
    */
   captureFeedback(feedback: Feedback): string | undefined {
     if (!this.enabled) return undefined;
-    const message = (feedback.message ?? "").trim();
+    const message = typeof feedback.message === "string" ? feedback.message.trim() : "";
     const score =
       typeof feedback.score === "number" && Number.isFinite(feedback.score)
         ? Math.max(-1, Math.min(1, feedback.score))
@@ -399,13 +450,16 @@ export class Client {
       ...getIsolationScope().user,
       ...getCurrentScope().user,
     };
-    // What they said and who they are are redacted like events.
-    const said: Record<string, unknown> = {
-      message,
-      name: user.username,
-      email: user.email,
-      url: feedback.url ?? (globalThis as { location?: { href?: string } }).location?.href,
-    };
+    // What they said and who they are are redacted like events, then cut.
+    const said = clipStrings(
+      {
+        message,
+        name: user.username,
+        email: user.email,
+        url: feedback.url ?? (globalThis as { location?: { href?: string } }).location?.href,
+      },
+      ahead(this.limit),
+    ) as Record<string, unknown>;
     this.redactor?.walk(said);
     const id = uuid4();
     const body = {
@@ -444,14 +498,18 @@ export class Client {
       duration: checkIn.duration,
       environment: this.options.environment ?? "production",
       monitor_config: c && {
-        schedule: c.schedule,
+        schedule: { ...c.schedule }, // a copy: its strings are cut
         checkin_margin: c.checkinMargin,
         max_runtime: c.maxRuntime,
         timezone: c.timezone,
       },
     };
     this.enqueue(() =>
-      this.json(`/v1/check-ins/${encodeURIComponent(checkIn.monitorSlug)}`, "check_in", body),
+      this.json(
+        `/v1/check-ins/${encodeURIComponent(clip(checkIn.monitorSlug, this.limit))}`,
+        "check_in",
+        body,
+      ),
     );
     return id;
   }
@@ -464,15 +522,23 @@ export class Client {
 
   /** Records a breadcrumb, through beforeBreadcrumb, on `scope` (default: the isolation scope). */
   addBreadcrumb(crumb: Breadcrumb, hint?: Record<string, unknown>, scope?: Scope): void {
-    let c: Breadcrumb | null = { timestamp: now(), ...crumb };
-    if (this.options.beforeBreadcrumb) {
-      try {
-        c = this.options.beforeBreadcrumb(c, hint);
-      } catch {
-        // keep the crumb
+    // What is logged from a callback (beforeBreadcrumb, beforeSend), and the
+    // SDK's own lines, are no breadcrumbs.
+    if (this.capturing) return;
+    this.capturing++;
+    try {
+      let c: Breadcrumb | null = { timestamp: now(), ...crumb };
+      if (this.options.beforeBreadcrumb) {
+        try {
+          c = this.options.beforeBreadcrumb(c, hint);
+        } catch (e) {
+          this.warn("beforeBreadcrumb failed", e);
+        }
       }
+      if (c) (scope ?? getIsolationScope()).addBreadcrumb(c);
+    } finally {
+      this.capturing--;
     }
-    if (c) (scope ?? getIsolationScope()).addBreadcrumb(c);
   }
 
   private prepare(event: Event, hint: EventHint): Event | null {
@@ -637,11 +703,11 @@ export class Client {
 
   private async sendAggregates(): Promise<void> {
     try {
-      const aggregates = await this.aggregates.take();
-      if (aggregates.length)
-        this.delivery.offer(
-          await this.json("/v1/sessions", "session", this.sessions({ aggregates })),
-        );
+      const all = await this.aggregates.take();
+      for (let i = 0; i < all.length; i += MAX_AGGREGATES) {
+        const aggregates = all.slice(i, i + MAX_AGGREGATES);
+        this.offer(await this.json("/v1/sessions", "session", this.sessions({ aggregates })));
+      }
     } catch (e) {
       this.warn("could not send sessions", e);
     }
@@ -650,10 +716,16 @@ export class Client {
   // Delivery.
 
   private enqueue(encode: Encode): void {
-    // While encoding lags (spans of every request at a high rate), more wait
-    // only up to a bound: the delivery queue keeps 64 requests anyway.
-    if (this.queue.length < MAX_PENDING) this.queue.push(encode);
+    // While encoding lags (spans of every request at a high rate), as many
+    // wait as the delivery queue holds; past that, new ones are dropped.
+    if (this.queue.length < (this.options.maxQueue ?? 100)) this.queue.push(encode);
+    else this.warn("the queue is full: data dropped");
     this.schedule();
+  }
+
+  /** Queues a request for sending, unless the queue is full. */
+  private offer(out: Outbound): void {
+    if (!this.delivery.offer(out)) this.warn("the queue is full: data dropped");
   }
 
   private schedule(delayMs = 0): void {
@@ -681,22 +753,23 @@ export class Client {
         const batch = this.queue;
         this.queue = [];
         for (const encode of batch) {
-          let out: Outbound | undefined;
+          let outs: Outbound | Outbound[] | undefined;
           try {
-            out = await encode();
+            outs = await encode();
           } catch (e) {
             this.warn("could not encode a request", e);
           }
-          if (!out) continue;
-          if (this.spool) {
-            try {
-              const { path, contentType, body, headers = {}, category } = out;
-              out.spoolId = await this.spool.put({ path, contentType, body, headers, category });
-            } catch (e) {
-              this.warn("could not write to the offline spool", e);
+          for (const out of outs ? [outs].flat() : []) {
+            if (this.spool) {
+              try {
+                const { path, contentType, body, headers = {}, category } = out;
+                out.spoolId = await this.spool.put({ path, contentType, body, headers, category });
+              } catch (e) {
+                this.warn("could not write to the offline spool", e);
+              }
             }
+            this.offer(out);
           }
-          this.delivery.offer(out);
         }
       }
       if (this.aggregates.size && (this.sessionsDue || this.closed)) {
@@ -739,7 +812,8 @@ export class Client {
       if (!dec.retry) this.unspool(item);
     } catch (e) {
       // Network errors are retried; past the last attempt the spool keeps the request.
-      this.delivery.onError(item, now(), e instanceof Error ? e.name : "network error");
+      const dec = this.delivery.onError(item, now(), e instanceof Error ? e.name : "network error");
+      if (dec.dropped) this.warn(`dropped a request to ${item.path} (${dec.reason})`);
     } finally {
       this.inFlight--;
       this.schedule();
@@ -767,15 +841,19 @@ export class Client {
     host = this.options.serverName,
   ): ResourceInfo {
     const p = this.platform;
-    return {
-      serviceName: p.serviceName,
-      release,
-      environment,
-      host,
-      sdkName: p.sdkName,
-      sdkVersion: SDK_VERSION,
-      language: p.language,
-    };
+    // The app's own configuration: cut, not redacted.
+    return clipStrings(
+      {
+        serviceName: p.serviceName,
+        release,
+        environment,
+        host,
+        sdkName: p.sdkName,
+        sdkVersion: SDK_VERSION,
+        language: p.language,
+      },
+      this.limit,
+    ) as ResourceInfo;
   }
 
   /** A request of `body` (compressed where the runtime can). */
@@ -792,19 +870,36 @@ export class Client {
     };
   }
 
-  /** A Fixwire JSON request (sessions, feedback, check-ins). */
+  /** A Fixwire JSON request (sessions, feedback, check-ins), its strings cut. */
   private json(path: string, category: string, body: object): Promise<Outbound> {
-    return this.request(path, category, JSON.stringify(body));
+    return this.request(path, category, JSON.stringify(clipStrings(body, this.limit)));
   }
 
-  /** An error or message: an OTLP log record on /v1/logs. */
+  /**
+   * An error or message: an OTLP log record on /v1/logs. Its strings are
+   * cut to what redaction reads, masked, then cut to maxValueLength.
+   */
   private async encodeEvent(event: Event): Promise<Outbound | undefined> {
     try {
       if (this.platform.enrich) await this.platform.enrich(event);
       const images = event.debug_meta ? undefined : debugImages(this.platform.stackParser, event);
       if (images) event.debug_meta = { images };
-      const data = normalize(event, this.options.maxValueLength ?? 1024) as Event &
-        Record<string, unknown>;
+      const w = ahead(this.limit);
+      // Breadcrumbs and frames are lists of the SDK's, not values of the
+      // app's: as many as the options say are kept (the newest frames).
+      const { breadcrumbs, exception, ...rest } = event;
+      const data = normalize(rest, w) as Event & Record<string, unknown>;
+      if (breadcrumbs) data.breadcrumbs = breadcrumbs.map((b) => normalize(b, w, 2) as Breadcrumb);
+      if (exception?.values)
+        data.exception = {
+          values: exception.values.map(({ stacktrace, ...x }) => {
+            const out = normalize(x, w, 3) as Exception;
+            const frames = stacktrace?.frames?.slice(-this.maxFrames);
+            if (frames)
+              out.stacktrace = { frames: frames.map((f) => normalize(f, w, 6) as StackFrame) };
+            return out;
+          }),
+        };
       if (this.redactor) {
         const kept: Record<string, unknown> = {};
         for (const k of REDACT_SKIP) {
@@ -816,16 +911,20 @@ export class Client {
         this.redactor.walk(data);
         Object.assign(data, kept);
       }
+      clipStrings(data, this.limit);
       const res = this.resource(data.release, data.environment, data.server_name);
-      let body = logsRequest(res, [eventRecord(data)]);
-      if (body.length > MAX_EVENT_BYTES) {
-        delete data.breadcrumbs;
-        delete data.extra;
-        body = logsRequest(res, [eventRecord(data)]);
-        if (body.length > MAX_EVENT_BYTES) {
-          this.warn("dropped an event over 1 MB");
-          return undefined;
-        }
+      const record = eventRecord(data);
+      let body = logsRequest(res, [record]);
+      // Over 1 MB: the breadcrumbs go, then the contexts (frames here carry
+      // no local variables), then the event.
+      for (const key of ["fixwire.breadcrumbs", "fixwire.contexts"]) {
+        if (utf8(body) <= MAX_EVENT_BYTES) break;
+        record.attributes = (record.attributes as KeyValue[]).filter((a) => a.key !== key);
+        body = logsRequest(res, [record]);
+      }
+      if (utf8(body) > MAX_EVENT_BYTES) {
+        this.warn("dropped an event over 1 MB");
+        return undefined;
       }
       return await this.request("/v1/logs", "error", body);
     } catch (e) {
@@ -834,19 +933,16 @@ export class Client {
     }
   }
 
-  /** A segment and its spans: an OTLP export on /v1/traces, redacted. */
-  private async encodeSegment(segment: Span): Promise<Outbound | undefined> {
+  /** A segment and its spans: OTLP exports on /v1/traces of at most 5 MB each, redacted. */
+  private async encodeSegment(segment: Span): Promise<Outbound[] | undefined> {
     try {
-      const spans = segment.spans().map((s) => {
-        const j = s.toJSON();
-        if (this.redactor) {
-          // Attribute values (URLs, queries, messages) and names.
-          this.redactor.walk(j.attributes);
-          j.name = this.redactor.mask(j.name)[0];
-        }
-        return { ...j, attributes: keyValues(j.attributes) };
-      });
-      return await this.request("/v1/traces", "span", tracesRequest(this.resource(), spans));
+      const res = this.resource();
+      const room = MAX_REQUEST_BYTES - utf8(tracesRequest(res, []));
+      return await Promise.all(
+        segment
+          .batches(this.limit, this.redactor, room)
+          .map((spans) => this.request("/v1/traces", "span", tracesRequest(res, spans))),
+      );
     } catch (e) {
       this.warn("could not encode spans", e);
       return undefined;
@@ -901,6 +997,12 @@ export class Client {
   }
 
   private warn(message: string, err?: unknown): void {
-    if (this.options.debug) console.warn(`[fixwire] ${message}`, err ?? "");
+    if (!this.options.debug) return;
+    this.capturing++; // the SDK's own lines are no breadcrumbs
+    try {
+      console.warn(`[fixwire] ${message}`, err ?? "");
+    } finally {
+      this.capturing--;
+    }
   }
 }

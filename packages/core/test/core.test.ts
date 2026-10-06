@@ -86,11 +86,11 @@ test("delivery retries with backoff, honours Retry-After and pauses rate-limited
   d.offer(request("bad"));
   assert.ok(d.onResponse(take(0), 400, () => null, 0).dropped);
   assert.equal(d.queue.length, 0);
-  // A 429 waits out Retry-After, then goes again.
+  // A 429 pauses everything for Retry-After (a minute at least), then goes again.
   d.offer(request("busy"));
   assert.ok(d.onResponse(take(0), 429, (n) => (n === "retry-after" ? "30" : null), 0).retry);
-  assert.equal(d.next(29), undefined);
-  assert.equal(d.next(30)?.body, "busy");
+  assert.equal(d.next(59), undefined);
+  assert.equal(d.next(60)?.body, "busy");
   // Fixwire-Rate-Limits pauses its kinds; the rest keeps flowing.
   d.offer(request("z"));
   const limits = (n: string) => (n === "fixwire-rate-limits" ? "60:error;log" : null);
@@ -108,19 +108,89 @@ test("delivery retries with backoff, honours Retry-After and pauses rate-limited
   });
 });
 
-test("a server can pause delivery for an hour at most", () => {
-  // Past 24.8 days a timer fires at once: a huge pause was a busy loop.
-  const d = new Delivery(64, 8 << 20, () => 0);
-  const header = (retryAfter: string, limits: string | null) => (n: string) =>
-    n === "retry-after" ? retryAfter : n === "fixwire-rate-limits" ? limits : null;
+test("a request is sent 4 times at most, about 1 s, 2 s and 4 s apart", () => {
+  const d = new Delivery(100, 8 << 20, () => 1); // no jitter: the full backoff
+  d.offer(request("x"));
+  const waits: number[] = [];
+  let now = 0;
+  for (let sends = 1; ; sends++) {
+    const item = d.next(now) as Outbound;
+    const dec = d.onResponse(item, 502, () => null, now);
+    if (dec.dropped) {
+      assert.equal(sends, MAX_ATTEMPTS);
+      break;
+    }
+    waits.push((d.wakeAt() as number) - now);
+    now = d.wakeAt() as number;
+  }
+  assert.deepEqual(waits, [1, 2, 4]);
+  // A 429's pause counts as a send too.
   d.offer(request("busy"));
-  d.onResponse(d.next(0) as Outbound, 429, header("1e12", null), 0);
-  assert.equal(d.limits[""], 3600);
-  assert.equal(d.wakeAt(), 3600);
-  d.onResponse(d.next(3600) as Outbound, 503, header("-5", "99999999:error"), 3600);
-  assert.equal(d.limits.error, 7200);
-  assert.ok((d.wakeAt() ?? Infinity) <= 7200);
-  assert.deepEqual(parseRateLimits("1e300:log, -60:span, x:file", 0), { log: 3600, span: 0 });
+  now = 1000;
+  const busy = (n: string) => (n === "retry-after" ? "1" : null);
+  for (let sends = 1; sends < MAX_ATTEMPTS; sends++) {
+    assert.ok(d.onResponse(d.next(now) as Outbound, 429, busy, now).retry);
+    now = d.wakeAt() as number;
+  }
+  assert.ok(d.onResponse(d.next(now) as Outbound, 429, busy, now).dropped);
+});
+
+test("a server can pause delivery for a day at most, and a request waits 5 minutes at most", () => {
+  // Past 24.8 days a timer fires at once: a huge pause was a busy loop.
+  const d = new Delivery(100, 8 << 20, () => 0);
+  const header = (retryAfter: string | null, limits: string | null) => (n: string) =>
+    n === "retry-after" ? retryAfter : n === "fixwire-rate-limits" ? limits : null;
+  // 86,401 s is a day; the request would wait that long: it is dropped.
+  d.offer(request("busy"));
+  const dec = d.onResponse(d.next(0) as Outbound, 429, header("86401", null), 0);
+  assert.ok(dec.dropped, dec.reason);
+  assert.equal(d.limits[""], 86_400);
+  // Requests queued meanwhile would wait past 5 minutes too: dropped, not kept.
+  d.offer(request("later"));
+  assert.equal(d.next(10), undefined);
+  assert.equal(d.queue.length, 0);
+
+  // A 5xx with Retry-After pauses everything for that long; an HTTP date counts from now.
+  const e = new Delivery(100, 8 << 20, () => 0);
+  const now = Date.parse("2026-10-06T10:00:00Z") / 1000;
+  e.offer(request("x"));
+  assert.ok(
+    e.onResponse(e.next(now) as Outbound, 503, header("Tue, 06 Oct 2026 10:02:00 GMT", null), now)
+      .retry,
+  );
+  assert.equal(e.limits[""], now + 120);
+  assert.equal(e.wakeAt(), now + 120);
+  // Broken values are ignored: no pause, the backoff alone.
+  const f = new Delivery(100, 8 << 20, () => 0);
+  f.offer(request("z"));
+  assert.ok(f.onResponse(f.next(0) as Outbound, 503, header("1e12", "soon:error"), 0).retry);
+  assert.deepEqual(f.limits, {});
+  assert.equal(f.wakeAt(), 0.5);
+  // Fixwire-Rate-Limits: a day at most, and only the protocol's categories.
+  assert.deepEqual(
+    parseRateLimits("99999999:error, 1e300:log, -60:span, x:file, 60:metric;session", 0),
+    {
+      error: 86_400,
+      session: 60,
+    },
+  );
+});
+
+test("at most maxQueue requests wait to be sent, and as many for a retry", () => {
+  const d = new Delivery(2, 8 << 20, () => 0);
+  assert.ok(d.offer(request("a")) && d.offer(request("b")));
+  assert.equal(d.offer(request("c")), false); // new data is dropped, the queued kept
+  assert.deepEqual(
+    d.queue.map((i) => i.body),
+    ["a", "b"],
+  );
+  const a = d.next(0) as Outbound;
+  const b = d.next(0) as Outbound;
+  assert.ok(d.offer(request("c")) && d.offer(request("e")));
+  assert.ok(d.onError(a, 0).retry && d.onError(b, 0).retry);
+  const c = d.next(0) as Outbound;
+  assert.ok(d.offer(request("f")));
+  assert.ok(d.onError(c, 0).dropped); // two wait for a retry already
 });
 
 test("errors with causes and AggregateErrors", () => {

@@ -1,17 +1,25 @@
-/** Source lines around in-app frames, read asynchronously and cached. */
+/**
+ * Source lines around in-app frames, read asynchronously and cached. Lines
+ * are sent whole: the client cuts them to maxValueLength after redaction.
+ */
 import { readFile, stat } from "node:fs/promises";
 
 import type { Event } from "@fixwire/core";
 
 const LINES = 5;
-const MAX_FILES = 100;
-const MAX_LINE = 200;
+/** What the cache keeps at most: files, and their bytes. */
+const MAX_FILES = 64;
+const MAX_CACHE_BYTES = 32 << 20;
 /** Larger files (bundles, data) get no context lines. */
-const MAX_FILE_BYTES = 2 << 20;
-/** What the cache keeps at most, in file bytes. */
-const MAX_CACHE_BYTES = 16 << 20;
+const MAX_FILE_BYTES = 10 << 20;
 const cache = new Map<string, { lines: string[] | null; bytes: number }>();
 let cachedBytes = 0;
+
+/** What the cache holds (for tests). */
+export const cached = (): { files: number; bytes: number } => ({
+  files: cache.size,
+  bytes: cachedBytes,
+});
 
 async function linesOf(path: string): Promise<string[] | null> {
   const hit = cache.get(path);
@@ -41,8 +49,6 @@ async function linesOf(path: string): Promise<string[] | null> {
   return lines;
 }
 
-const clip = (s: string): string => (s.length > MAX_LINE ? `${s.slice(0, MAX_LINE)}...` : s);
-
 export async function addContextLines(event: Event): Promise<void> {
   for (const ex of event.exception?.values ?? []) {
     for (const f of ex.stacktrace?.frames ?? []) {
@@ -57,9 +63,9 @@ export async function addContextLines(event: Event): Promise<void> {
       const lines = await linesOf(f.filename);
       const i = f.lineno - 1;
       if (!lines || i < 0 || i >= lines.length) continue;
-      f.pre_context = lines.slice(Math.max(0, i - LINES), i).map(clip);
-      f.context_line = clip(lines[i] as string);
-      f.post_context = lines.slice(i + 1, i + 1 + LINES).map(clip);
+      f.pre_context = lines.slice(Math.max(0, i - LINES), i);
+      f.context_line = lines[i] as string;
+      f.post_context = lines.slice(i + 1, i + 1 + LINES);
     }
   }
 }

@@ -56,21 +56,49 @@ test("incoming trace headers: traceparent, with tracestate and baggage kept to p
   }
 });
 
-test("a caller's oversized or non-ASCII tracestate and baggage are not passed on", () => {
-  // Passed on, they could oversize the app's own requests, or make setting
-  // the header throw.
-  for (const bad of ["k=v".padEnd(8193, "x"), "k=v\r\nInjected: 1", "k=café"]) {
+test("a caller's oversized tracestate and baggage, or with a control character, are not passed on", () => {
+  // Passed on, they could oversize the app's own requests, or split them.
+  for (const [tracestate, baggage] of [
+    ["k=v".padEnd(513, "x"), "k=v".padEnd(8193, "x")],
+    // Bytes, not characters: "é" is two.
+    ["k=é".padEnd(512, "x"), "k=é".padEnd(8192, "x")],
+    ["k=v\r\nInjected: 1", "k=v\nInjected: 1"],
+    ["k=v\0", "k=v\x7f"],
+  ]) {
     const ctx = propagationFromHeaders({
       traceparent: `00-${TRACE}-${PARENT}-01`,
-      tracestate: bad,
-      baggage: bad,
+      tracestate,
+      baggage,
     });
     assert.ok(ctx.continued);
     assert.equal(ctx.tracestate, undefined);
     assert.equal(ctx.baggage, undefined);
   }
-  const ok = "k=v,".repeat(2048).slice(0, 8192);
-  assert.equal(propagationFromHeaders({ baggage: ok }).baggage, ok);
+  // At the limits they go on whole, tabs (W3C's list whitespace) and all.
+  const tracestate = "fw=1,\tk=é".padEnd(511, "a");
+  const baggage = "k=v,\tu=é".padEnd(8191, "b");
+  const ctx = propagationFromHeaders({
+    traceparent: `00-${TRACE}-${PARENT}-01`,
+    tracestate,
+    baggage,
+  });
+  assert.equal(ctx.tracestate, tracestate);
+  assert.equal(ctx.baggage, baggage);
+  assert.equal(traceHeaders().tracestate, undefined); // not this scope's trace
+});
+
+test("only a well-formed traceparent is continued", () => {
+  assert.ok(propagationFromHeaders({ traceparent: ` 00-${TRACE}-${PARENT}-01\t` }).continued);
+  for (const bad of [
+    `01-${TRACE}-${PARENT}-01`,
+    `00-${TRACE}-${PARENT}-01-extra`,
+    `00-${TRACE.toUpperCase()}-${PARENT}-01`,
+    `00-${TRACE}-${PARENT}-0g`,
+    `00-${"0".repeat(32)}-${PARENT}-01`,
+    `00-${TRACE}-${"0".repeat(16)}-01`,
+    `00-${TRACE}-${PARENT}-01\n`,
+  ])
+    assert.equal(propagationFromHeaders({ traceparent: bad }).continued, false, bad);
 });
 
 test("sampling: the sampler first, then the caller's decision, then the rate against the trace id", () => {
@@ -299,6 +327,55 @@ test("trace headers follow the active span and pass the caller's tracestate and 
     assert.ok(shouldPropagate("https://shop.example/api") && shouldPropagate("/api"));
     for (const other of ["//evil.example/x", "/\\evil.example/x", "https://shop.example.evil/x"])
       assert.ok(!shouldPropagate(other), other);
+  } finally {
+    delete g.location;
+  }
+});
+
+test("tracePropagationTargets: URL prefixes, hosts with their subdomains, paths and patterns", () => {
+  fakeClient({
+    tracePropagationTargets: [
+      "example.com",
+      "internal.test:8443",
+      "https://api.partner.io/v2",
+      "/same-origin",
+      "[::1]:8080",
+      /\/graphql$/,
+    ],
+  });
+  for (const [url, want] of [
+    ["https://example.com/x", true],
+    ["https://API.Example.COM/x", true],
+    ["http://example.com:8080/x", true],
+    ["https://badexample.com/x", false],
+    ["https://example.com.evil.net/x", false],
+    ["https://evil.net/?next=example.com", false],
+    ["https://evil.net/#example.com", false],
+    ["https://example.com@evil.net/", false],
+    ["https://internal.test:8443/", true],
+    ["https://svc.internal.test:8443/", true],
+    ["https://internal.test/", false],
+    ["https://internal.test:9000/", false],
+    ["https://api.partner.io/v2/orders?id=1", true],
+    ["https://user:pw@api.partner.io/v2/x", true],
+    ["https://api.partner.io/v1/orders", false],
+    ["https://evil.net/https://api.partner.io/v2", false],
+    ["https://evil.net/same-origin", false],
+    ["/same-origin/x", false], // no page: nothing is same-origin
+    ["http://[::1]:8080/", true],
+    ["https://evil.net/graphql", true],
+    ["https://evil.net/x?q=/graphql", false], // the query isn't compared
+    ["not a url", false],
+  ] as const)
+    assert.equal(shouldPropagate(url), want, url);
+  // In a browser, a path is a prefix of the page's own origin's paths.
+  const g = globalThis as { location?: unknown };
+  g.location = { origin: "https://shop.example" };
+  try {
+    assert.ok(shouldPropagate("/same-origin/x"));
+    assert.ok(shouldPropagate("https://shop.example/same-origin"));
+    assert.ok(!shouldPropagate("https://other.example/same-origin"));
+    assert.ok(!shouldPropagate("/other"));
   } finally {
     delete g.location;
   }

@@ -39,13 +39,17 @@ export function debugImages(parser: StackParser, event: Event): DebugImage[] | u
   return images.length ? images : undefined;
 }
 
-const MAX_LINKED = 5;
+/** Exceptions in one event: the one thrown, its causes and grouped errors. */
+const MAX_EXCEPTIONS = 10;
 
-export function exceptionFromError(parser: StackParser, err: Error): Exception {
+/** An error's exception value, with at most `maxFrames` frames (the newest). */
+export function exceptionFromError(parser: StackParser, err: Error, maxFrames?: number): Exception {
   const ex: Exception = { type: err.name || err.constructor?.name || "Error", value: err.message };
   // V8 stacks start with "name: message". The message is no frames, and its
   // lines may be anyone's text (input): fake frames, or lines slow to parse.
-  const frames = err.stack ? parser(err.stack.replace(`: ${err.message}\n`, ":\n")) : [];
+  const frames = err.stack
+    ? parser(err.stack.replace(`: ${err.message}\n`, ":\n"), 0, 0, maxFrames)
+    : [];
   if (frames.length) ex.stacktrace = { frames };
   return ex;
 }
@@ -57,24 +61,24 @@ const isError = (v: unknown): v is Error =>
     typeof (v as Error).message === "string" &&
     typeof (v as Error).stack === "string");
 
-/** The exception values of an error and its causes (oldest last raised first, as the protocol wants). */
+/**
+ * The exception values of an error and its causes (oldest last raised
+ * first, as the protocol wants): at most MAX_EXCEPTIONS, the chain cut
+ * where it comes back to one already in it.
+ */
 export function exceptionsFromError(
   parser: StackParser,
   err: Error,
   mechanism: Mechanism,
+  maxFrames?: number,
 ): Exception[] {
   const out: Exception[] = [];
   const seen = new Set<unknown>();
   let id = 0;
-  const visit = (
-    e: Error,
-    source: string | undefined,
-    parentId: number | undefined,
-    depth: number,
-  ): void => {
-    if (seen.has(e) || depth > MAX_LINKED) return;
+  const visit = (e: Error, source: string | undefined, parentId: number | undefined): void => {
+    if (seen.has(e) || out.length >= MAX_EXCEPTIONS) return;
     seen.add(e);
-    const ex = exceptionFromError(parser, e);
+    const ex = exceptionFromError(parser, e, maxFrames);
     const myId = id++;
     ex.mechanism = { ...mechanism, exception_id: myId };
     if (parentId !== undefined) {
@@ -85,14 +89,13 @@ export function exceptionsFromError(
     const errors = (e as { errors?: unknown }).errors;
     if (Array.isArray(errors)) ex.mechanism.is_exception_group = true;
     out.push(ex);
-    if (isError(e.cause)) visit(e.cause, "cause", myId, depth + 1);
+    if (isError(e.cause)) visit(e.cause, "cause", myId);
     if (Array.isArray(errors)) {
-      errors.forEach((c, i) => {
-        if (isError(c)) visit(c, `errors[${i}]`, myId, depth + 1);
-      });
+      for (let i = 0; i < errors.length && out.length < MAX_EXCEPTIONS; i++)
+        if (isError(errors[i])) visit(errors[i], `errors[${i}]`, myId);
     }
   };
-  visit(err, undefined, undefined, 0);
+  visit(err, undefined, undefined);
   return out.reverse();
 }
 
@@ -103,9 +106,13 @@ export function eventFromUnknown(
   hint: EventHint,
   mechanism: Mechanism,
   maxValueLength: number,
+  maxFrames?: number,
 ): Event {
   if (isError(value)) {
-    return { level: "error", exception: { values: exceptionsFromError(parser, value, mechanism) } };
+    return {
+      level: "error",
+      exception: { values: exceptionsFromError(parser, value, mechanism, maxFrames) },
+    };
   }
   // Not an error: describe it, with the stack of where it was captured.
   const ex: Exception = { type: "Error", mechanism: { ...mechanism, synthetic: true } };
@@ -125,7 +132,7 @@ export function eventFromUnknown(
   }
   const synthetic = hint.syntheticException?.stack;
   if (synthetic) {
-    const frames = parser(synthetic, 1);
+    const frames = parser(synthetic, 1, 0, maxFrames);
     if (frames.length) ex.stacktrace = { frames };
   }
   return event;
