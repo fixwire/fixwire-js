@@ -403,7 +403,10 @@ test("the gecko parser takes time linear in the line", () => {
     const [ms10k = 0, ms50k = 0, ms100k = 0] = ms;
     const what = `${JSON.stringify(shape(8))}: ${ms.map((t) => t.toFixed(2)).join(", ")} ms`;
     assert.ok(ms10k < 50 && ms100k < 250, what);
-    assert.ok(ms100k < 3 * ms50k + 1, what); // twice the line, about twice the time
+    // Twice the line, about twice the time. CPU clocks tick in milliseconds on
+    // some systems (a 50k line can read 0.00), so the slack is 10 ms: a
+    // quadratic parse takes seconds here.
+    assert.ok(ms100k < 3 * ms50k + 10, what);
   }
 });
 
