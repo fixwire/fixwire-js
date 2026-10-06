@@ -212,6 +212,7 @@ test("an unhandled rejection is reported once, then Node does what its mode says
         // stack, Node shows the line that made the error until its stack is
         // read (reporting it reads it), then its own: compared without.
         stderr = stderr
+          .replace(/\r\n/g, "\n") // Windows
           .replace(/\(node:\d+\)/g, "(node)")
           .replace(/rejection id: \d+/g, "id")
           .replace(/^.*\n.*\n *\^+\n\n/, "");
