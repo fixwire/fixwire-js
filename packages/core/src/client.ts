@@ -220,6 +220,8 @@ export interface Platform {
 
 /** The ingest's limit for one event. */
 const MAX_EVENT_BYTES = 1 << 20;
+/** Captures waiting to be encoded. */
+const MAX_PENDING = 1000;
 const REDACT_SKIP = [
   "event_id",
   "timestamp",
@@ -308,22 +310,29 @@ export class Client {
    */
   captureException(exception: unknown, hint: EventHint = {}): string | undefined {
     if (!this.enabled) return undefined;
-    // The same error object reported twice (explicitly, then by a handler) is sent once.
-    if (
-      exception &&
-      typeof exception === "object" &&
-      (exception as { __fixwire_captured__?: boolean }).__fixwire_captured__
-    )
-      return undefined;
     const mechanism: Mechanism = hint.mechanism ?? { type: "generic", handled: true };
-    const syntheticException = hint.syntheticException ?? new Error("Fixwire syntheticException");
-    const event = eventFromUnknown(
-      this.platform.stackParser,
-      exception,
-      { ...hint, syntheticException },
-      mechanism,
-      this.options.maxValueLength ?? 1024,
-    );
+    let event: Event;
+    // Getters and proxies may throw: that must not reach the caller.
+    try {
+      // The same error object reported twice (explicitly, then by a handler) is sent once.
+      if (
+        exception &&
+        typeof exception === "object" &&
+        (exception as { __fixwire_captured__?: boolean }).__fixwire_captured__
+      )
+        return undefined;
+      const syntheticException = hint.syntheticException ?? new Error("Fixwire syntheticException");
+      event = eventFromUnknown(
+        this.platform.stackParser,
+        exception,
+        { ...hint, syntheticException },
+        mechanism,
+        this.options.maxValueLength ?? 1024,
+      );
+    } catch (e) {
+      this.warn("could not prepare an event", e);
+      return undefined;
+    }
     if (mechanism.handled === false) event.level = "fatal";
     const id = this.captureEvent(event, { ...hint, originalException: exception });
     if (id && exception && typeof exception === "object") {
@@ -641,7 +650,9 @@ export class Client {
   // Delivery.
 
   private enqueue(encode: Encode): void {
-    this.queue.push(encode);
+    // While encoding lags (spans of every request at a high rate), more wait
+    // only up to a bound: the delivery queue keeps 64 requests anyway.
+    if (this.queue.length < MAX_PENDING) this.queue.push(encode);
     this.schedule();
   }
 

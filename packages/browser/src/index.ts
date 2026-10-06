@@ -43,7 +43,7 @@ export const browserPlatform = (): Platform => ({
     const ua = g.navigator?.userAgent;
     if (g.location && !event.request)
       event.request = {
-        url: g.location.href.split("?")[0],
+        url: g.location.href.split(/[?#]/)[0], // the query and fragment may hold tokens
         ...(ua ? { headers: { "user-agent": ua } } : {}),
       };
   },

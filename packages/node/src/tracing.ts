@@ -31,6 +31,20 @@ const once = (name: string, fn: () => void): void => {
   fn();
 };
 
+/**
+ * A diagnostics_channel subscriber that never throws: Node rethrows a
+ * subscriber's error as an uncaught exception, which would end the app.
+ */
+export const guarded =
+  (fn: (message: unknown) => void) =>
+  (message: unknown): void => {
+    try {
+      fn(message);
+    } catch {
+      // the app's request goes on without its span or headers
+    }
+  };
+
 interface Outgoing {
   span: Span | undefined;
   scope: Scope;
@@ -126,25 +140,40 @@ export const httpClientIntegration = (): Integration => ({
   name: "HttpClient",
   setup: () =>
     once("http.client", () => {
-      diagnostics.subscribe("http.client.request.created", (m) => {
-        onClientRequest((m as { request: ClientRequest }).request, true);
-      });
+      diagnostics.subscribe(
+        "http.client.request.created",
+        guarded((m) => {
+          onClientRequest((m as { request: ClientRequest }).request, true);
+        }),
+      );
       // Older Node: no "created" channel, and "start" is too late for headers.
-      diagnostics.subscribe("http.client.request.start", (m) => {
-        onClientRequest((m as { request: ClientRequest }).request, false);
-      });
-      diagnostics.subscribe("http.client.response.finish", (m) => {
-        const { request, response } = m as { request: ClientRequest; response: IncomingMessage };
-        const o = requests.get(request);
-        if (o) finish(o, response.statusCode);
-        requests.delete(request);
-      });
-      diagnostics.subscribe("http.client.request.error", (m) => {
-        const { request, error } = m as { request: ClientRequest; error: unknown };
-        const o = requests.get(request);
-        if (o) finish(o, undefined, error);
-        requests.delete(request);
-      });
+      diagnostics.subscribe(
+        "http.client.request.start",
+        guarded((m) => {
+          onClientRequest((m as { request: ClientRequest }).request, false);
+        }),
+      );
+      diagnostics.subscribe(
+        "http.client.response.finish",
+        guarded((m) => {
+          const { request, response } = m as {
+            request: ClientRequest;
+            response: IncomingMessage;
+          };
+          const o = requests.get(request);
+          requests.delete(request);
+          if (o) finish(o, response.statusCode);
+        }),
+      );
+      diagnostics.subscribe(
+        "http.client.request.error",
+        guarded((m) => {
+          const { request, error } = m as { request: ClientRequest; error: unknown };
+          const o = requests.get(request);
+          requests.delete(request);
+          if (o) finish(o, undefined, error);
+        }),
+      );
     }),
 });
 
@@ -179,30 +208,39 @@ export const fetchIntegration = (): Integration => ({
   name: "Fetch",
   setup: () =>
     once("fetch", () => {
-      diagnostics.subscribe("undici:request:create", (m) => {
-        const req = (m as { request: UndiciRequest }).request;
-        const url = `${String(req.origin).replace(/\/$/, "")}${req.path}`;
-        const o = begin(req.method, url, "auto.http.node.fetch");
-        fetches.set(req, o);
-        if (undiciHeader(req, "traceparent") === undefined) {
-          for (const [k, v] of Object.entries(headersFor(o, url)))
-            if (undiciHeader(req, k) === undefined) req.addHeader(k, v);
-        }
-      });
-      diagnostics.subscribe("undici:request:headers", (m) => {
-        const { request, response } = m as {
-          request: UndiciRequest;
-          response: { statusCode: number };
-        };
-        const o = fetches.get(request);
-        if (o) finish(o, response.statusCode);
-        fetches.delete(request);
-      });
-      diagnostics.subscribe("undici:request:error", (m) => {
-        const { request, error } = m as { request: UndiciRequest; error: unknown };
-        const o = fetches.get(request);
-        if (o) finish(o, undefined, error);
-        fetches.delete(request);
-      });
+      diagnostics.subscribe(
+        "undici:request:create",
+        guarded((m) => {
+          const req = (m as { request: UndiciRequest }).request;
+          const url = `${String(req.origin).replace(/\/$/, "")}${req.path}`;
+          const o = begin(req.method, url, "auto.http.node.fetch");
+          fetches.set(req, o);
+          if (undiciHeader(req, "traceparent") === undefined) {
+            for (const [k, v] of Object.entries(headersFor(o, url)))
+              if (undiciHeader(req, k) === undefined) req.addHeader(k, v);
+          }
+        }),
+      );
+      diagnostics.subscribe(
+        "undici:request:headers",
+        guarded((m) => {
+          const { request, response } = m as {
+            request: UndiciRequest;
+            response: { statusCode: number };
+          };
+          const o = fetches.get(request);
+          fetches.delete(request);
+          if (o) finish(o, response.statusCode);
+        }),
+      );
+      diagnostics.subscribe(
+        "undici:request:error",
+        guarded((m) => {
+          const { request, error } = m as { request: UndiciRequest; error: unknown };
+          const o = fetches.get(request);
+          fetches.delete(request);
+          if (o) finish(o, undefined, error);
+        }),
+      );
     }),
 });

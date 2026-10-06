@@ -45,6 +45,10 @@ export function makeNodeTransport(timeoutMs = 10_000): Transport {
         } finally {
           sdkRequest.active = false;
         }
+        // The socket timeout only notices silence: a server that trickles
+        // its answer is cut off by this deadline instead.
+        const deadline = setTimeout(() => r.destroy(new Error("timeout")), timeoutMs).unref();
+        r.on("close", () => clearTimeout(deadline));
         r.on("timeout", () => r.destroy(new Error("timeout")));
         r.on("error", reject);
         r.end(body);

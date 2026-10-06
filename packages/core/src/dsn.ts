@@ -18,7 +18,8 @@ const DSN_REGEX = /^(\w+):\/\/([\w.~-]+)@([\w.-]+)(?::(\d+))?(\/[^?#]*)?$/;
 
 export function parseDsn(value: string): Dsn {
   const m = DSN_REGEX.exec(value.trim());
-  if (!m) throw new Error(`invalid DSN: ${value}`);
+  // Not echoed: the DSN holds the key, and errors end up in logs.
+  if (!m) throw new Error("invalid DSN");
   const [, protocol = "", publicKey = "", host = "", port = "", rest = ""] = m;
   if (protocol !== "http" && protocol !== "https")
     throw new Error(`unsupported DSN protocol: ${protocol}`);

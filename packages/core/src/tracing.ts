@@ -124,6 +124,13 @@ function header(headers: HeaderSource, name: string): string | undefined {
   return undefined;
 }
 
+/**
+ * A caller's tracestate or baggage, to pass on: within the W3C size limit
+ * (8192) and printable ASCII, so it can't oversize or break outgoing requests.
+ */
+const passable = (v: string | undefined): string | undefined =>
+  v && v.length <= 8192 && /^[\t -~]*$/.test(v) ? v : undefined;
+
 /** The trace of incoming headers (traceparent, tracestate, baggage), or a new one. */
 export function propagationFromHeaders(headers: HeaderSource): PropagationContext {
   const ctx = newPropagationContext();
@@ -134,9 +141,9 @@ export function propagationFromHeaders(headers: HeaderSource): PropagationContex
     ctx.parentSpanId = m[2];
     ctx.sampled = (Number.parseInt(m[3] as string, 16) & 1) === 1;
     ctx.sampleRand = randOf(ctx.traceId);
-    ctx.tracestate = header(headers, "tracestate") || undefined;
+    ctx.tracestate = passable(header(headers, "tracestate"));
   }
-  ctx.baggage = header(headers, "baggage") || undefined;
+  ctx.baggage = passable(header(headers, "baggage"));
   return ctx;
 }
 
@@ -506,7 +513,8 @@ export function shouldPropagate(url: string): boolean {
   if (targets === undefined) {
     const origin = (globalThis as { location?: { origin?: string } }).location?.origin;
     if (!origin) return false;
-    return url.startsWith(`${origin}/`) || url === origin || /^\/(?!\/)/.test(url);
+    // A path, not "//host" or "/\host" (browsers read both as another host).
+    return url.startsWith(`${origin}/`) || url === origin || /^\/(?![/\\])/.test(url);
   }
   return targets.some((t) => (typeof t === "string" ? url.includes(t) : t.test(url)));
 }

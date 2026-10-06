@@ -43,7 +43,9 @@ const MAX_LINKED = 5;
 
 export function exceptionFromError(parser: StackParser, err: Error): Exception {
   const ex: Exception = { type: err.name || err.constructor?.name || "Error", value: err.message };
-  const frames = err.stack ? parser(err.stack) : [];
+  // V8 stacks start with "name: message". The message is no frames, and its
+  // lines may be anyone's text (input): fake frames, or lines slow to parse.
+  const frames = err.stack ? parser(err.stack.replace(`: ${err.message}\n`, ":\n")) : [];
   if (frames.length) ex.stacktrace = { frames };
   return ex;
 }

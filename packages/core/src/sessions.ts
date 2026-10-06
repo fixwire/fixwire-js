@@ -53,6 +53,13 @@ interface Bucket {
   crashed: number;
 }
 
+/**
+ * Counts kept until the next send: past them a request counts for its minute
+ * without its user, so memory and the body (1 MB at most) stay bounded
+ * whatever the user ids are.
+ */
+const MAX_BUCKETS = 5000;
+
 /** Request sessions counted per minute and user, until sent. */
 export class SessionAggregates {
   private buckets = new Map<string, Bucket>();
@@ -63,6 +70,7 @@ export class SessionAggregates {
 
   record(status: RequestStatus, did: string | undefined, at: number): void {
     const minute = Math.floor(at / 60) * 60;
+    if (this.buckets.size >= MAX_BUCKETS) did = undefined;
     const key = `${minute}\x00${did ?? ""}`;
     let b = this.buckets.get(key);
     if (!b) {

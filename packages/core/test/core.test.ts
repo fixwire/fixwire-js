@@ -43,6 +43,18 @@ test("fingerprints ignore lines, numbers and bundle hashes", () => {
   assert.equal(template("order 123 for a@b.io"), "order <*> for <*>");
 });
 
+test("templates take linear time on hostile messages", () => {
+  const started = performance.now();
+  // "@@@…" took cubic time: a minute at 4,096 characters.
+  for (const text of ["@", "a@", "a@b.", "1.", "0x", "a"])
+    template(text.repeat(Math.ceil(65_536 / text.length)));
+  assert.ok(performance.now() - started < 2000, `${performance.now() - started} ms`);
+  assert.equal(
+    template("user 42 is ada@example.com\nid=7 mail=bob@ex.org"),
+    "user <*> is <*>\nid=<*> <*>",
+  );
+});
+
 const request = (body: string, category = "error"): Outbound => ({
   path: "/v1/logs",
   contentType: "application/json",
@@ -96,6 +108,21 @@ test("delivery retries with backoff, honours Retry-After and pauses rate-limited
   });
 });
 
+test("a server can pause delivery for an hour at most", () => {
+  // Past 24.8 days a timer fires at once: a huge pause was a busy loop.
+  const d = new Delivery(64, 8 << 20, () => 0);
+  const header = (retryAfter: string, limits: string | null) => (n: string) =>
+    n === "retry-after" ? retryAfter : n === "fixwire-rate-limits" ? limits : null;
+  d.offer(request("busy"));
+  d.onResponse(d.next(0) as Outbound, 429, header("1e12", null), 0);
+  assert.equal(d.limits[""], 3600);
+  assert.equal(d.wakeAt(), 3600);
+  d.onResponse(d.next(3600) as Outbound, 503, header("-5", "99999999:error"), 3600);
+  assert.equal(d.limits.error, 7200);
+  assert.ok((d.wakeAt() ?? Infinity) <= 7200);
+  assert.deepEqual(parseRateLimits("1e300:log, -60:span, x:file", 0), { log: 3600, span: 0 });
+});
+
 test("errors with causes and AggregateErrors", () => {
   const root = new TypeError("socket closed");
   const err = new Error("charge failed", { cause: root });
@@ -114,6 +141,15 @@ test("errors with causes and AggregateErrors", () => {
   const g = exceptionsFromError(parser, group, { type: "generic" });
   assert.deepEqual(g.map((v) => v.type).sort(), ["AggregateError", "RangeError", "SyntaxError"]);
   assert.ok(g.find((v) => v.type === "AggregateError")?.mechanism?.is_exception_group);
+});
+
+test("a message's lines are not read as frames", () => {
+  // Input in a message must not fake a frame (a file to read context lines from).
+  const err = new Error("bad input:\n    at evil (/dev/zero:1:1)\n    at more (/etc/passwd:2:2)");
+  const [ex] = exceptionsFromError(parser, err, { type: "generic" });
+  const files = (ex?.stacktrace?.frames ?? []).map((f) => f.filename);
+  assert.ok(files.length > 0);
+  assert.ok(!files.includes("/dev/zero") && !files.includes("/etc/passwd"), String(files));
 });
 
 test("scope layers and the browser stack strategy", async () => {
@@ -147,6 +183,24 @@ test("normalize bounds and describes values", () => {
     s: "xxxxxxx...",
     self: "[Circular ~]",
   });
+});
+
+test("normalize stays bounded on shared references, buffers and hostile objects", () => {
+  // Each level refers to the next ten times: 10^9 paths, walked to a budget.
+  let shared: Record<string, unknown> = { leaf: 1 };
+  for (let i = 0; i < 9; i++)
+    shared = Object.fromEntries(Array.from({ length: 10 }, (_, k) => [`k${k}`, shared]));
+  const bytes = new Uint8Array(20_000_000).fill(7);
+  const revoked = Proxy.revocable({}, {});
+  revoked.revoke();
+  const started = performance.now();
+  const json = JSON.stringify(normalize(shared));
+  const out = normalize({ bytes, revoked: revoked.proxy }) as Record<string, unknown>;
+  assert.ok(performance.now() - started < 2000, `${performance.now() - started} ms`);
+  assert.ok(json.length < 2_000_000 && json.includes('"[Object]"'), `${json.length} characters`);
+  assert.deepEqual(Object.keys(out.bytes as object).length, 100);
+  assert.equal((out.bytes as Record<string, number>)["99"], 7);
+  assert.equal(out.revoked, "[Unreadable]");
 });
 
 test("a custom integration replaces the default of the same name", () => {

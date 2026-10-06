@@ -1,5 +1,5 @@
 // Ported (MIT) from upstream packages/browser/src/stack-parsers.ts; copyright and provenance: NOTICE, UPSTREAM.md. Modified for Fixwire: the
-// Opera 10/11 and WinJS parsers are dropped.
+// Opera 10/11 and WinJS parsers are dropped, and the gecko expression no longer backtracks cubically.
 //
 // This was originally forked from https://github.com/csnover/TraceKit, and was largely
 // re - written as part of raven - js.
@@ -117,15 +117,19 @@ const chromeStackParserFn: StackLineParserFn = (line) => {
 
 export const chromeStackLineParser: StackLineParser = [CHROME_PRIORITY, chromeStackParserFn];
 
-// gecko regex: `(?:bundle|\d+\.js)`: `bundle` is for react native, `\d+\.js` also but specifically for ram bundles because it
+// gecko regex: `(?:bundle|\d\.js)`: `bundle` is for react native, `\d\.js` also but specifically for ram bundles because it
 // generates filenames without a prefix like `file://` the filenames in the stacktrace are just 42.js
 // We need this specific case for now because we want no other regex to match.
+// Fixwire: it runs on the trimmed line, without the `^\s*` and `\s*$` (and with `\d` for `\d+`, which
+// `[^@]*` covers), whose overlap with `(.*?)` and the filename backtracked cubically on long lines.
 const geckoREgex =
-  /^\s*(.*?)(?:\((.*?)\))?(?:^|@)?((?:[-a-z]+)?:\/.*?|\[native code\]|[^@]*(?:bundle|\d+\.js)|\/[\w\-. /=]+)(?::(\d+))?(?::(\d+))?\s*$/i;
+  /^(.*?)(?:\((.*?)\))?(?:^|@)?((?:[-a-z]+)?:\/.*?|\[native code\]|[^@]*(?:bundle|\d\.js)|\/[\w\-. /=]+)(?::(\d+))?(?::(\d+))?$/i;
 const geckoEvalRegex = /(\S+) line (\d+)(?: > eval line \d+)* > eval/i;
 
 const gecko: StackLineParserFn = (line) => {
-  const parts = geckoREgex.exec(line) as null | [string, string, string, string, string, string];
+  const parts = geckoREgex.exec(line.trim()) as
+    | null
+    | [string, string, string, string, string, string];
 
   if (parts) {
     const isEval = parts[3] && parts[3].indexOf(" > eval") > -1;

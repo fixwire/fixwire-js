@@ -371,6 +371,28 @@ function urlCredentialSpans(s: string): Span[] {
   return out;
 }
 
+/**
+ * The JWT pattern at one start, else the rest of the start's run of
+ * base64url characters ([\w-]): each part of a JWT is a whole run, so no
+ * start in that run can match either.
+ */
+const JWT = /eyJ[\w-]{8,}\.eyJ[\w-]{8,}\.[\w-]{8,}|[\w-]+/y;
+
+/**
+ * `\bJWT` with the same matches in linear time: searched as one regular
+ * expression it backtracks quadratically on text like "eyJ-eyJ-…".
+ */
+function jwtSpans(s: string): Span[] {
+  const out: Span[] = [];
+  for (let i = s.indexOf("eyJ"); i >= 0; i = s.indexOf("eyJ", i + 1)) {
+    if (i > 0 && isWord(s.charCodeAt(i - 1))) continue;
+    JWT.lastIndex = i;
+    if ((JWT.exec(s) as RegExpExecArray)[0].includes(".")) out.push([i, JWT.lastIndex]);
+    i = JWT.lastIndex - 1;
+  }
+  return out;
+}
+
 /** Rejects values a scrubber already replaced. */
 const unmasked = (v: string): boolean => !v.startsWith("[REDACTED") && v !== FILTERED;
 
@@ -441,12 +463,7 @@ const REGISTRY: Detector[] = [
     caseSensitive: true,
     re: /\bsk-(?:(?:proj|svcacct|admin)-[A-Za-z0-9_-]{40,}|[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20})/g,
   },
-  {
-    name: "jwt",
-    prefilter: ["eyJ"],
-    caseSensitive: true,
-    re: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
-  },
+  { name: "jwt", prefilter: ["eyJ"], caseSensitive: true, scan: jwtSpans },
   {
     name: "fixwire_secret_key",
     prefilter: ["_sk_live_", "_sk_test_"],
@@ -549,6 +566,22 @@ function codePoints(s: string, from: number, to: number): number {
   return n;
 }
 
+/**
+ * Whether [start, end) overlaps one of `fs`, sorted by start and disjoint:
+ * of those starting before `end`, the last ends last. (Not quite so with an
+ * empty finding, which only a custom pattern matching "" makes.)
+ */
+function overlaps(fs: Finding[], start: number, end: number): boolean {
+  let lo = 0;
+  let hi = fs.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((fs[mid] as Finding).start < end) lo = mid + 1;
+    else hi = mid;
+  }
+  return start < (fs[lo - 1]?.end ?? 0);
+}
+
 /** Orders strings like Go and Python do (by code point, not UTF-16 unit). */
 const byCodePoint = (a: string, b: string): number => {
   const x = Array.from(a);
@@ -593,7 +626,7 @@ export class Redactor {
 
   /** Non-overlapping findings, leftmost first; on overlap the earlier detector wins. */
   find(s: string): Finding[] {
-    const out: Finding[] = [];
+    let out: Finding[] = [];
     let lowered: string | undefined;
     for (const d of this.detectors) {
       if (d.prefilter) {
@@ -602,13 +635,17 @@ export class Redactor {
         if (!d.prefilter.some((p) => hay.includes(p))) continue;
       }
       if (d.may && !d.may(s)) continue;
+      // A detector's spans come leftmost first, so its findings stay sorted
+      // too: both lists are searched, not scanned.
+      const mine: Finding[] = [];
       for (const [start, end] of spans(d, s)) {
         if (d.validate && !d.validate(s.slice(start, end))) continue;
-        if (out.some((f) => start < f.end && f.start < end)) continue;
-        out.push({ detector: d.name, start, end });
+        if (overlaps(out, start, end) || overlaps(mine, start, end)) continue;
+        mine.push({ detector: d.name, start, end });
       }
+      if (mine.length) out = out.concat(mine).sort((a, b) => a.start - b.start);
     }
-    return out.sort((a, b) => a.start - b.start);
+    return out;
   }
 
   /** Replaces each finding with [REDACTED:<detector>]. */

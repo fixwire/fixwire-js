@@ -56,6 +56,23 @@ test("incoming trace headers: traceparent, with tracestate and baggage kept to p
   }
 });
 
+test("a caller's oversized or non-ASCII tracestate and baggage are not passed on", () => {
+  // Passed on, they could oversize the app's own requests, or make setting
+  // the header throw.
+  for (const bad of ["k=v".padEnd(8193, "x"), "k=v\r\nInjected: 1", "k=café"]) {
+    const ctx = propagationFromHeaders({
+      traceparent: `00-${TRACE}-${PARENT}-01`,
+      tracestate: bad,
+      baggage: bad,
+    });
+    assert.ok(ctx.continued);
+    assert.equal(ctx.tracestate, undefined);
+    assert.equal(ctx.baggage, undefined);
+  }
+  const ok = "k=v,".repeat(2048).slice(0, 8192);
+  assert.equal(propagationFromHeaders({ baggage: ok }).baggage, ok);
+});
+
 test("sampling: the sampler first, then the caller's decision, then the rate against the trace id", () => {
   const ctx = propagationFromHeaders({ traceparent: `00-${TRACE}-${PARENT}-00` });
   assert.equal(sample({ tracesSampleRate: 1 }, ctx, "x", {}), false);
@@ -275,4 +292,14 @@ test("trace headers follow the active span and pass the caller's tracestate and 
   assert.ok(!shouldPropagate("https://evil.example/?u=https://pay.example"));
   fakeClient({});
   assert.ok(!shouldPropagate("https://api.internal/orders")); // no targets, no browser origin
+  // In a browser, by default: the page's own origin, and paths (not "//host" or "/\host").
+  const g = globalThis as { location?: unknown };
+  g.location = { origin: "https://shop.example" };
+  try {
+    assert.ok(shouldPropagate("https://shop.example/api") && shouldPropagate("/api"));
+    for (const other of ["//evil.example/x", "/\\evil.example/x", "https://shop.example.evil/x"])
+      assert.ok(!shouldPropagate(other), other);
+  } finally {
+    delete g.location;
+  }
 });

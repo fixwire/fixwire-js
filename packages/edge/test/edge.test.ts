@@ -161,3 +161,41 @@ test("fetch calls are spans, and carry the trace to allowed hosts", async () => 
   );
   await Fixwire.close();
 });
+
+test("deliveries follow no redirect and time out; a fetch the SDK can't read still goes out", async () => {
+  // The key must not follow a redirect elsewhere, and a hung ingest must not hold a slot forever.
+  let init: RequestInit | undefined;
+  const transport = Fixwire.makeEdgeTransport(async (_url, i) => {
+    init = i;
+    return new Response(null, { status: 302, headers: { location: "https://elsewhere.example/" } });
+  });
+  const res = await transport.send({
+    url: "https://ingest.example/v1/logs",
+    body: "{}",
+    headers: {},
+  });
+  assert.equal(res.status, 302);
+  assert.equal(init?.redirect, "manual");
+  assert.ok(init?.signal instanceof AbortSignal);
+
+  const downstream = await listen();
+  Fixwire.init({
+    dsn: `http://publickey@${downstream.url}`,
+    asyncLocalStorage: AsyncLocalStorage,
+    tracesSampleRate: 1,
+    // A target that throws, and an input with only a string form: both threw out of fetch.
+    tracePropagationTargets: [
+      {
+        test: () => {
+          throw new Error("bad target");
+        },
+      } as unknown as RegExp,
+    ],
+  });
+  await Fixwire.startSpan({ name: "job", forceSegment: true }, async () => {
+    const target = { toString: () => `http://${downstream.url}/stock` };
+    assert.equal((await fetch(target as unknown as string)).status, 200);
+  });
+  assert.ok(downstream.got.some((r) => r.url.endsWith("/stock")));
+  await Fixwire.close();
+});

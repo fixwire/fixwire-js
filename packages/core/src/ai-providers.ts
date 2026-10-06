@@ -14,6 +14,7 @@ import {
   chatSpanOptions,
   embeddingsSpanOptions,
   failed,
+  MAX_AI_CONTENT,
   recording,
   type TokenUsage,
 } from "./ai.ts";
@@ -27,12 +28,30 @@ interface Spec {
   spanOptions(params: Json, record: boolean): StartSpanOptions;
   streaming(params: Json): boolean;
   response(result: Json): ChatResponse;
-  /** Reads a stream's events; returns the response once it ends. */
-  stream?(): { observe(event: Json): void; response(): ChatResponse };
+  /** Reads a stream's events; returns the response once it ends. `keep`: its text is recorded. */
+  stream?(keep: boolean): { observe(event: Json): void; response(): ChatResponse };
 }
 
 const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+
+/**
+ * A streamed answer's text, for its recorded output: kept only when it is
+ * recorded, and only as much as is (a long stream holds no more memory).
+ */
+function streamedText(keep: boolean): { add(text: unknown): void; output(): unknown } {
+  const parts: string[] = [];
+  let size = 0;
+  return {
+    add(text) {
+      if (keep && typeof text === "string" && size <= MAX_AI_CONTENT) {
+        parts.push(text);
+        size += text.length;
+      }
+    },
+    output: () => (parts.length ? [{ role: "assistant", content: parts.join("") }] : undefined),
+  };
+}
 
 const isAsyncIterable = (v: unknown): v is AsyncIterable<Json> =>
   !!v && typeof (v as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] === "function";
@@ -125,7 +144,7 @@ function traced(spec: Spec, target: object, method: (...args: unknown[]) => unkn
     }
     const reader = spec.stream;
     return Promise.resolve(result).then((res) => {
-      if (isAsyncIterable(res)) return traceStream(res, call, reader());
+      if (isAsyncIterable(res)) return traceStream(res, call, reader(record && span.isRecording()));
       finish(res);
       return res;
     }, fail);
@@ -200,10 +219,10 @@ const anthropicMessages: Spec = {
     output: m.content,
     usage: anthropicUsage(m.usage),
   }),
-  stream: () => {
+  stream: (keep) => {
     const r: ChatResponse = {};
     let usage: Json = {};
-    const texts: string[] = [];
+    const text = streamedText(keep);
     return {
       observe(ev) {
         if (ev.type === "message_start" && ev.message) {
@@ -214,15 +233,11 @@ const anthropicMessages: Spec = {
           if (ev.delta?.stop_reason) r.finishReasons = [ev.delta.stop_reason];
           if (num(ev.usage?.output_tokens) !== undefined)
             usage.output_tokens = ev.usage.output_tokens;
-        } else if (ev.type === "content_block_delta" && typeof ev.delta?.text === "string") {
-          texts.push(ev.delta.text);
+        } else if (ev.type === "content_block_delta") {
+          text.add(ev.delta?.text);
         }
       },
-      response: () => ({
-        ...r,
-        usage: anthropicUsage(usage),
-        output: texts.length ? [{ role: "assistant", content: texts.join("") }] : undefined,
-      }),
+      response: () => ({ ...r, usage: anthropicUsage(usage), output: text.output() }),
     };
   },
 };
@@ -278,17 +293,17 @@ const openaiChat: Spec = {
     output: Array.isArray(c.choices) ? c.choices.map((ch: Json) => ch.message) : undefined,
     usage: openaiChatUsage(c.usage),
   }),
-  stream: () => {
+  stream: (keep) => {
     const r: ChatResponse = {};
     const reasons = new Set<string>();
-    const texts: string[] = [];
+    const text = streamedText(keep);
     let usage: Json | undefined;
     return {
       observe(chunk) {
         r.id ??= str(chunk.id);
         r.model ??= str(chunk.model);
         for (const ch of Array.isArray(chunk.choices) ? chunk.choices : []) {
-          if (typeof ch.delta?.content === "string") texts.push(ch.delta.content);
+          text.add(ch.delta?.content);
           if (ch.finish_reason) reasons.add(ch.finish_reason);
         }
         // Present on the last chunk with stream_options: { include_usage: true }.
@@ -298,7 +313,7 @@ const openaiChat: Spec = {
         ...r,
         finishReasons: reasons.size ? [...reasons] : undefined,
         usage: openaiChatUsage(usage),
-        output: texts.length ? [{ role: "assistant", content: texts.join("") }] : undefined,
+        output: text.output(),
       }),
     };
   },

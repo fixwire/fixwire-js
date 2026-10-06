@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { getIsolationScope, withIsolationScope } from "../src/scope.ts";
+import { SessionAggregates } from "../src/sessions.ts";
 import { bodiesOf, fakeClient, type Json } from "./helpers.ts";
 
 /** The /v1/sessions bodies sent: page sessions, or a server's aggregates. */
@@ -80,6 +81,19 @@ test("each request is a session: exited, errored or crashed, counted per minute 
   assert.equal(dids.size, 2, "two users, hashed");
   for (const d of dids) assert.match(String(d), /^[0-9a-f]{32}$/);
   await client.close();
+});
+
+test("past 5,000 users a minute, requests are counted without one", async () => {
+  // User ids may come from anyone: memory and the body stay bounded.
+  const aggregates = new SessionAggregates();
+  for (let i = 0; i < 6_000; i++) aggregates.record("ok", `user-${i}`, 60);
+  aggregates.record("crashed", "user-0", 60);
+  assert.equal(aggregates.size, 5_001);
+  const counts = await aggregates.take();
+  const sum = (k: string) => counts.reduce((n, a) => n + Number(a[k] ?? 0), 0);
+  assert.equal(sum("exited"), 6_000);
+  assert.equal(sum("crashed"), 1);
+  assert.equal(counts.filter((a) => !a.did).length, 1);
 });
 
 test("sessions need a release, and can be turned off", async () => {

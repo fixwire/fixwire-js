@@ -125,6 +125,51 @@ test("a message is a fixwire.message record with its body and level", async () =
   assert.equal(warn.resource["deployment.environment.name"], "production");
 });
 
+test("capturing never throws into the app, whatever was thrown", async () => {
+  const { client, sent } = fakeClient({});
+  const revoked = Proxy.revocable({}, {});
+  revoked.revoke();
+  const hostile = [
+    revoked.proxy,
+    Object.defineProperty(new Error("x"), "stack", {
+      get: () => {
+        throw new Error("no stack");
+      },
+    }),
+    Object.assign(Object.create(Error.prototype), { message: "m", stack: 42 }),
+    new Proxy(
+      { message: "m", stack: "s" },
+      {
+        get: () => {
+          throw new Error("trap");
+        },
+      },
+    ),
+    {
+      get constructor(): never {
+        throw new Error("getter");
+      },
+      a: 1,
+    },
+  ];
+  // Their getters and traps threw out of captureException; now they're dropped.
+  for (const value of hostile) assert.doesNotThrow(() => client.captureException(value));
+  client.captureException(new Error("still reporting"));
+  assert.ok(await client.flush(2000));
+  assert.deepEqual(
+    recordsOf(sent).map((r) => r.attributes["exception.message"]),
+    ["still reporting"],
+  );
+});
+
+test("captures waiting to be encoded are bounded", async () => {
+  // Check-ins, feedback and spans have no budget: a burst outran encoding without limit.
+  const { client } = fakeClient({});
+  for (let i = 0; i < 5_000; i++) client.captureCheckIn({ monitorSlug: "job", status: "ok" });
+  assert.equal((client as unknown as { queue: unknown[] }).queue.length, 1_000);
+  await client.close(2000);
+});
+
 test("budgets fold repeats into the next event's fixwire.suppressed", async () => {
   const { client, sent } = fakeClient({ rateLimit: { perIssueBurst: 1, perIssuePerMinute: 6000 } });
   const boom = () => new Error("boom");

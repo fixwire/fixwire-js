@@ -19,7 +19,7 @@ import {
 } from "@fixwire/core";
 
 import { enterIsolationScope } from "./context.ts";
-import { fetchIntegration, httpClientIntegration } from "./tracing.ts";
+import { fetchIntegration, guarded, httpClientIntegration } from "./tracing.ts";
 
 const installed = new Set<string>();
 const once = (name: string, fn: () => void): void => {
@@ -123,40 +123,43 @@ export const httpServerIntegration = (): Integration => ({
   name: "HttpServer",
   setup: () =>
     once("http", () => {
-      diagnostics.subscribe("http.server.request.start", (message) => {
-        enterIsolationScope();
-        const { request, response } = message as {
-          request?: IncomingMessage;
-          response?: ServerResponse;
-        };
-        if (request) {
-          continueTrace(request.headers);
-          // Release health: each request is a session, ended with its response.
-          if (response && !isDelivery(request)) {
-            const end = getClient()?.startRequestSession(getIsolationScope());
-            if (end) {
-              response.once("finish", end);
-              response.once("close", end);
+      diagnostics.subscribe(
+        "http.server.request.start",
+        guarded((message) => {
+          enterIsolationScope();
+          const { request, response } = message as {
+            request?: IncomingMessage;
+            response?: ServerResponse;
+          };
+          if (request) {
+            continueTrace(request.headers);
+            // Release health: each request is a session, ended with its response.
+            if (response && !isDelivery(request)) {
+              const end = getClient()?.startRequestSession(getIsolationScope());
+              if (end) {
+                response.once("finish", end);
+                response.once("close", end);
+              }
             }
+            // An SDK delivery (an app relaying telemetry, or an ingest in this
+            // process) is not the app's traffic: tracing it would send a span
+            // per export, and one per span after that.
+            if (hasTracingEnabled(getClient()?.options) && !isDelivery(request))
+              serverSpan(request, response);
+            getIsolationScope().addEventProcessor((event) => {
+              event.request ??= requestInfo(request, !!getClient()?.options.sendDefaultPii);
+              const route = routeOf(request);
+              if (route && !event.transaction) event.transaction = route;
+              return event;
+            });
           }
-          // An SDK delivery (an app relaying telemetry, or an ingest in this
-          // process) is not the app's traffic: tracing it would send a span
-          // per export, and one per span after that.
-          if (hasTracingEnabled(getClient()?.options) && !isDelivery(request))
-            serverSpan(request, response);
-          getIsolationScope().addEventProcessor((event) => {
-            event.request ??= requestInfo(request, !!getClient()?.options.sendDefaultPii);
-            const route = routeOf(request);
-            if (route && !event.transaction) event.transaction = route;
-            return event;
+          getClient()?.addBreadcrumb({
+            category: "http.server",
+            type: "http",
+            data: { method: request?.method, url: request?.url },
           });
-        }
-        getClient()?.addBreadcrumb({
-          category: "http.server",
-          type: "http",
-          data: { method: request?.method, url: request?.url },
-        });
-      });
+        }),
+      );
     }),
 });
 

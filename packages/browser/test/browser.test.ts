@@ -48,7 +48,8 @@ test("the client sends OTLP through fetch with a bearer key; a hidden page, keep
   const target = new EventTarget();
   const g = globalThis as Record<string, unknown>;
   const saved = { location: g.location, document: g.document };
-  g.location = { href: "https://shop.example/cart?coupon=x" };
+  // The query and fragment may hold tokens (an OAuth callback): not sent.
+  g.location = { href: "https://shop.example/cart?coupon=x#access_token=ya29.secret" };
   try {
     const client = Fixwire.init({
       dsn: "https://publickey@ingest.fixwire.example",
@@ -257,5 +258,71 @@ test("page loads, route changes and fetch calls are traced; the server page's tr
     assert.equal(spans.filter((s) => s.parentSpanId === navigation.spanId).length, 1);
   } finally {
     Object.assign(g, saved);
+  }
+});
+
+test("hostile stack lines parse quickly, and a message's lines are not frames", () => {
+  // Each took the gecko expression most of a second (cubic backtracking).
+  const hostile = [`${" ".repeat(1023)}@`, `${"1".repeat(1023)}@`, `${"a:/".repeat(340)}@`];
+  let started = performance.now();
+  defaultStackParser(Array.from({ length: 30 }, (_, i) => hostile[i % 3]).join("\n"));
+  assert.ok(performance.now() - started < 1000, `${performance.now() - started} ms`);
+  // A message is text from anywhere: in a V8 stack its lines come first.
+  const parens = `${"(".repeat(512)}${")".repeat(511)}@/a`;
+  const err = new TypeError(
+    `bad input\n${Array(20).fill(parens).join("\n")}\n    at fake (https://evil.example/x.js:1:1)`,
+  );
+  started = performance.now();
+  const [ex] = Fixwire.exceptionsFromError(defaultStackParser, err, { type: "generic" });
+  assert.ok(performance.now() - started < 1000, `${performance.now() - started} ms`);
+  const files = (ex?.stacktrace?.frames ?? []).map((f) => f.filename);
+  assert.ok(files.length > 0 && !files.some((f) => f?.includes("evil")), String(files));
+});
+
+test("breadcrumbs never break the app's fetch or console calls, and stay cheap", async () => {
+  const g = globalThis as Record<string, unknown>;
+  const saved = { fetch: g.fetch, debug: console.debug };
+  const urls: string[] = [];
+  g.fetch = async (input: unknown) => {
+    urls.push(String(input));
+    return new Response("ok");
+  };
+  console.debug = () => {};
+  const crumbs: Fixwire.Breadcrumb[] = [];
+  try {
+    Fixwire.init({
+      dsn: "https://publickey@ingest.fixwire.example",
+      defaultIntegrations: false,
+      integrations: [Fixwire.breadcrumbsIntegration()],
+      transport: Fixwire.makeFetchTransport(async () => new Response("{}")),
+      beforeBreadcrumb: (c) => {
+        crumbs.push(c);
+        return c;
+      },
+    });
+    // fetch takes anything with a string form; the breadcrumb read its `url` and threw.
+    const target = { toString: () => "https://api.example/orders?token=x#frag" };
+    assert.equal((await fetch(target as unknown as string)).status, 200);
+    assert.deepEqual(urls, ["https://api.example/orders?token=x#frag"]);
+    assert.equal(
+      crumbs.find((c) => c.category === "fetch")?.data?.url,
+      "https://api.example/orders",
+    );
+    // A large object logged: only what the 1,024-character message keeps is serialized.
+    let reads = 0;
+    const rows = Array.from({ length: 100_000 }, (_, i) => ({
+      get i() {
+        reads++;
+        return i;
+      },
+    }));
+    console.debug("rows", rows);
+    assert.ok(reads < 2_000, `${reads} values read`);
+    const logged = crumbs.find((c) => c.category === "console")?.message ?? "";
+    assert.ok(logged.startsWith('rows [{"i":0},{"i":1},') && logged.length <= 1024);
+  } finally {
+    g.fetch = saved.fetch;
+    console.debug = saved.debug;
+    await Fixwire.close();
   }
 });

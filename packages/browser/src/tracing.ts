@@ -163,34 +163,36 @@ function instrumentFetch(): void {
   const original = g.fetch;
   if (typeof original !== "function" || installed("tracing:fetch")) return;
   g.fetch = function fixwireTraced(input: RequestInfo | URL, init?: RequestInit) {
-    const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    const url = absolute(raw);
-    const dsn = getClient()?.dsn;
-    if (dsn && url.startsWith(`${dsn.baseUrl}/`)) return original(input, init); // our own delivery
-    const method = (
-      init?.method ?? (typeof input === "object" && "method" in input ? input.method : "GET")
-    ).toUpperCase();
-    const plain = url.split(/[?#]/, 1)[0] ?? url;
-    const parent = getActiveSpan();
-    const span = parent?.isRecording()
-      ? startInactiveSpan({
-          name: `${method} ${plain}`,
-          op: "http.client",
-          origin: "auto.http.browser.fetch",
-          attributes: { "http.request.method": method, "url.full": plain },
-        })
-      : undefined;
+    let span: Span | undefined;
     let args: [RequestInfo | URL, RequestInit | undefined] = [input, init];
-    if (shouldPropagate(url)) {
-      const headers = new Headers(
-        init?.headers ??
-          (typeof input === "object" && "headers" in input ? input.headers : undefined),
-      );
-      if (!headers.has("traceparent")) {
-        for (const [k, v] of Object.entries(traceHeaders({ span })))
-          if (!headers.has(k)) headers.set(k, v);
-        args = [input, { ...init, headers }];
+    // What fails here (odd arguments, a header fetch would refuse) leaves the call as it was.
+    try {
+      // A Request, else a string or anything fetch turns into one (a URL).
+      const req = typeof input === "object" && "url" in input ? input : undefined;
+      const url = absolute(req ? req.url : String(input));
+      const dsn = getClient()?.dsn;
+      if (dsn && url.startsWith(`${dsn.baseUrl}/`)) return original(input, init); // our own delivery
+      const method = String(init?.method ?? req?.method ?? "GET").toUpperCase();
+      const plain = url.split(/[?#]/, 1)[0] ?? url;
+      const parent = getActiveSpan();
+      span = parent?.isRecording()
+        ? startInactiveSpan({
+            name: `${method} ${plain}`,
+            op: "http.client",
+            origin: "auto.http.browser.fetch",
+            attributes: { "http.request.method": method, "url.full": plain },
+          })
+        : undefined;
+      if (shouldPropagate(url)) {
+        const headers = new Headers(init?.headers ?? req?.headers);
+        if (!headers.has("traceparent")) {
+          for (const [k, v] of Object.entries(traceHeaders({ span })))
+            if (!headers.has(k)) headers.set(k, v);
+          args = [input, { ...init, headers }];
+        }
       }
+    } catch {
+      args = [input, init];
     }
     const end = (status: number | undefined, failed: boolean): void => {
       if (!span) return;

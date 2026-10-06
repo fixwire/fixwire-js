@@ -25,6 +25,7 @@ import {
   type Platform,
   resolveIntegrations,
   Scope,
+  type Span,
   setAsyncContextStrategy,
   shouldPropagate,
   startInactiveSpan,
@@ -67,6 +68,9 @@ export function makeEdgeTransport(fetchImpl: typeof fetch | undefined = runtimeF
         method: "POST",
         body: req.body as BodyInit,
         headers: req.headers,
+        // The key is for the ingest: a redirect isn't followed (it's dropped).
+        redirect: "manual",
+        signal: AbortSignal.timeout?.(10_000),
       });
       await res.body?.cancel(); // only the status and headers matter
       return { status: res.status, header: (name) => res.headers.get(name) };
@@ -158,30 +162,36 @@ export const fetchIntegration = (): Integration => ({
     if (fetchPatched || typeof original !== "function") return;
     fetchPatched = true;
     globalThis.fetch = function fixwireFetch(input: RequestInfo | URL, init?: RequestInit) {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      const method = (
-        init?.method ?? (input instanceof Request ? input.method : "GET")
-      ).toUpperCase();
-      const plain = url.split(/[?#]/, 1)[0] ?? url;
-      const parent = getActiveSpan();
-      const span = parent?.isRecording()
-        ? startInactiveSpan({
-            name: `${method} ${plain}`,
-            op: "http.client",
-            origin: "auto.http.edge.fetch",
-            attributes: { "http.request.method": method, "url.full": plain },
-          })
-        : undefined;
+      let span: Span | undefined;
+      let method = "GET";
+      let plain = "";
       let args: [RequestInfo | URL, RequestInit | undefined] = [input, init];
-      if (shouldPropagate(url)) {
-        const headers = new Headers(
-          init?.headers ?? (input instanceof Request ? input.headers : undefined),
-        );
-        if (!headers.has("traceparent")) {
-          for (const [k, v] of Object.entries(traceHeaders({ span })))
-            if (!headers.has(k)) headers.set(k, v);
-          args = [input, { ...init, headers }];
+      // What fails here (odd arguments, a header fetch would refuse) leaves the call as it was.
+      try {
+        // A Request, else a string or anything fetch turns into one (a URL).
+        const req = typeof input === "object" && "url" in input ? input : undefined;
+        const url = req ? req.url : String(input);
+        method = String(init?.method ?? req?.method ?? "GET").toUpperCase();
+        plain = url.split(/[?#]/, 1)[0] ?? url;
+        const parent = getActiveSpan();
+        span = parent?.isRecording()
+          ? startInactiveSpan({
+              name: `${method} ${plain}`,
+              op: "http.client",
+              origin: "auto.http.edge.fetch",
+              attributes: { "http.request.method": method, "url.full": plain },
+            })
+          : undefined;
+        if (shouldPropagate(url)) {
+          const headers = new Headers(init?.headers ?? req?.headers);
+          if (!headers.has("traceparent")) {
+            for (const [k, v] of Object.entries(traceHeaders({ span })))
+              if (!headers.has(k)) headers.set(k, v);
+            args = [input, { ...init, headers }];
+          }
         }
+      } catch {
+        args = [input, init];
       }
       const end = (status: number | undefined, error?: unknown): void => {
         if (span) {

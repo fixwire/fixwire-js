@@ -486,3 +486,143 @@ test("serverless: each invocation is its own segment, errors are reported and fl
   assert.equal(a["fixwire.tags"].card, "4000"); // its own scope: not the first call's tag
   assert.equal(thrown(event as Json).mechanism.type, "serverless");
 });
+
+test("context lines come only from regular files of a source file's size", async () => {
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { spawnSync } = await import("node:child_process");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { addContextLines } = await import("../src/context-lines.ts");
+  const dir = mkdtempSync(join(tmpdir(), "fixwire-context-"));
+  const small = join(dir, "small.js");
+  writeFileSync(small, "a();\nthrow new Error('x');\nb();\n");
+  const big = join(dir, "big.js");
+  writeFileSync(big, "x();\n".repeat(1_000_000)); // 5 MB
+  // A frame's path is text a message can fake: a FIFO would block forever,
+  // /dev/zero would be read until memory runs out.
+  const fifo = join(dir, "fifo");
+  const special = process.platform === "win32" ? [] : ["/dev/zero"];
+  if (process.platform !== "win32" && spawnSync("mkfifo", [fifo]).status === 0) special.push(fifo);
+  const frames = [small, big, ...special].map((filename) => ({
+    filename,
+    lineno: 2,
+    in_app: true,
+  }));
+  const event = { exception: { values: [{ type: "Error", stacktrace: { frames } }] } };
+  const done = addContextLines(event).then(() => "done");
+  const timeout = new Promise((r) => setTimeout(() => r("timed out"), 3000).unref());
+  assert.equal(await Promise.race([done, timeout]), "done");
+  assert.deepEqual(
+    frames.map((f) => (f as { context_line?: string }).context_line),
+    ["throw new Error('x');", ...frames.slice(1).map(() => undefined)],
+  );
+});
+
+test("the file spool is private to its user and sends only to the ingest", async () => {
+  const {
+    existsSync,
+    lstatSync,
+    mkdirSync,
+    mkdtempSync,
+    rmSync,
+    statSync,
+    symlinkSync,
+    writeFileSync,
+  } = await import("node:fs");
+  const { createHash } = await import("node:crypto");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = join(mkdtempSync(join(tmpdir(), "fixwire-spool-")), "spool");
+  const dsn = { publicKey: "publickey", baseUrl: "http://127.0.0.1:9" };
+  const request = {
+    path: "/v1/logs",
+    contentType: "application/json",
+    body: "{}",
+    headers: {},
+    category: "error",
+  };
+  const id = await Fixwire.makeFileSpool({ offline: dir }, dsn)?.put(request);
+  if (process.platform !== "win32") {
+    assert.equal(statSync(dir).mode & 0o777, 0o700);
+    assert.equal(statSync(join(dir, String(id))).mode & 0o777, 0o600);
+  }
+  // A request file naming another host (its path is appended to the DSN's
+  // base URL) is dropped, not sent with the key.
+  const forged = join(dir, `${Date.now().toString().padStart(15, "0")}-forged.req`);
+  writeFileSync(forged, `${JSON.stringify({ ...request, path: "@evil.example/x" })}\n{}`);
+  const loaded = await Fixwire.makeFileSpool({ offline: dir }, dsn)?.load();
+  assert.deepEqual(
+    loaded?.map((r) => r.path),
+    ["/v1/logs"],
+  );
+  assert.ok(!existsSync(forged));
+
+  // The default directory is under the shared temp directory: one another
+  // user made (here, a link in its place) is not used.
+  if (process.platform === "win32") return;
+  const linked = { publicKey: "linked", baseUrl: `http://127.0.0.1:${process.pid}` };
+  const hash = createHash("sha256").update(`linked@${linked.baseUrl}`).digest("hex").slice(0, 16);
+  const shared = join(tmpdir(), "fixwire", hash);
+  mkdirSync(join(tmpdir(), "fixwire"), { recursive: true });
+  rmSync(shared, { recursive: true, force: true });
+  symlinkSync(dir, shared);
+  try {
+    assert.ok(lstatSync(shared).isSymbolicLink());
+    assert.equal(Fixwire.makeFileSpool({ offline: true }, linked), undefined);
+  } finally {
+    rmSync(shared, { force: true });
+  }
+});
+
+test("a delivery whose answer trickles in is cut off at the timeout", async () => {
+  const { makeNodeTransport } = await import("../src/transport.ts");
+  // The socket timeout only notices silence: a byte every 50 ms kept it waiting forever.
+  const server = createServer((req, res) => {
+    req.resume();
+    res.writeHead(200);
+    const drip = setInterval(() => res.write("."), 50);
+    res.on("close", () => clearInterval(drip));
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as { port: number }).port;
+  const started = Date.now();
+  await assert.rejects(
+    makeNodeTransport(300).send({
+      url: `http://127.0.0.1:${port}/v1/logs`,
+      body: "{}",
+      headers: {},
+    }),
+    /timeout/,
+  );
+  assert.ok(Date.now() - started < 2000, `${Date.now() - started} ms`);
+  server.closeAllConnections();
+  server.close();
+});
+
+test("an integration that fails never fails the app's requests", async () => {
+  const { server: ingestServer, dsn } = await ingest();
+  const svc = await downstream();
+  const client = Fixwire.init({
+    dsn,
+    tracesSampleRate: 1,
+    // Throwing in a diagnostics_channel subscriber was an uncaught exception: the app ended.
+    tracePropagationTargets: [
+      {
+        test: () => {
+          throw new Error("bad target");
+        },
+      } as unknown as RegExp,
+    ],
+  });
+  await Fixwire.startSpan({ name: "job" }, async () => {
+    await new Promise<void>((resolve) =>
+      request(`${svc.base}/stock`, (r) => r.resume().on("end", resolve)).end(),
+    );
+    assert.equal((await fetch(`${svc.base}/stock`)).status, 200);
+  });
+  assert.ok(await client.flush(5000));
+  await Fixwire.close();
+  svc.server.close();
+  ingestServer.close();
+  assert.equal(svc.seen.length, 2);
+});

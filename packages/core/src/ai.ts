@@ -340,12 +340,17 @@ function tool<T>(options: ToolOptions, cb: (call: ToolSpan) => T): T {
         "gen_ai.tool.call.id": options.callId,
         "gen_ai.tool.description": options.description,
         "gen_ai.agent.name": currentAgent(),
-        "fixwire.tool.arguments_hash":
-          options.arguments !== undefined ? argumentsHash(options.arguments) : undefined,
-        "gen_ai.tool.call.arguments": maybe(record, options.arguments),
       },
     },
-    (span) => new ToolSpan(span, record),
+    (span) => {
+      // Serialized and hashed only for a span that is sent (not on every call).
+      if (span.isRecording() && options.arguments !== undefined)
+        span.setAttributes({
+          "fixwire.tool.arguments_hash": argumentsHash(options.arguments),
+          "gen_ai.tool.call.arguments": maybe(record, options.arguments),
+        });
+      return new ToolSpan(span, record);
+    },
     cb,
   );
 }

@@ -7,8 +7,10 @@
  */
 import type { Event } from "./types.ts";
 
+// An email is tried once per word, from the space before it: `\S+@\S+\.\w+`
+// tried at every character took cubic time on text like "@@@…".
 const NUMBERS =
-  /\b0x[0-9a-fA-F]+\b|\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b|\b[0-9a-fA-F]{16,}\b|\d+(?:\.\d+)?|\S+@\S+\.\w+/g;
+  /(^|\s)[^\s@]+@[^\s@]+\.\w+|\b0x[0-9a-fA-F]+\b|\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b|\b[0-9a-fA-F]{16,}\b|\d+(?:\.\d+)?/g;
 const LINE_SUFFIX = /:\d+(?::\d+)?$/;
 const QUERY_HASH = /[?#].*$/;
 const BUNDLE_HASH = /([.-])[0-9a-f]{6,}(?=\.\w+$)/i;
@@ -23,7 +25,7 @@ function fnv(text: string, seed: number): string {
   return h.toString(16).padStart(8, "0");
 }
 
-export const template = (message: string): string => message.replace(NUMBERS, "<*>");
+export const template = (message: string): string => message.replace(NUMBERS, "$1<*>");
 
 const where = (filename: string): string =>
   filename

@@ -210,3 +210,42 @@ test("a failed or abandoned model call still ends its span", async () => {
   const abandoned = chats.find((s) => s.name === "chat claude-opus-5-5");
   assert.equal(attr(abandoned, "gen_ai.response.id"), "msg_2");
 });
+
+test("a tool call outside a recorded trace doesn't serialize or hash its arguments", async () => {
+  // The hash walks the whole arguments: work wasted on a span nobody sends.
+  let reads = 0;
+  const args = {
+    get document() {
+      reads++;
+      return "x".repeat(1_000);
+    },
+  };
+  fakeClient({}); // tracing off
+  assert.equal(
+    ai.tool({ name: "save", arguments: args }, () => "saved"),
+    "saved",
+  );
+  assert.equal(reads, 0);
+  const { client, sent } = fakeClient({ tracesSampleRate: 1 });
+  ai.tool({ name: "save", arguments: args }, () => "saved");
+  assert.ok(await client.flush(2000));
+  assert.equal(reads, 1);
+  const [tool] = byOp(spansOf(sent), "gen_ai.execute_tool");
+  assert.match(String(attr(tool, "fixwire.tool.arguments_hash")), /^[0-9a-f]{16}$/);
+});
+
+test("a streamed answer is kept for its output only when content is recorded, and only as much", async () => {
+  const long = "word ".repeat(10_000); // 50,000 characters
+  async function* events() {
+    yield { type: "message_start", message: { id: "msg_3", model: "m", usage: {} } };
+    for (let i = 0; i < 10; i++) yield { type: "content_block_delta", delta: { text: long } };
+  }
+  const anthropic = wrapAnthropic({ messages: { create: async (_: Json) => events() } });
+  const { client, sent } = fakeClient({ tracesSampleRate: 1, recordAiContent: true });
+  for await (const _ of (await anthropic.messages.create({ stream: true })) as AsyncIterable<Json>);
+  assert.ok(await client.flush(2000));
+  const [chat] = byOp(spansOf(sent), "gen_ai.chat");
+  const output = String(attr(chat, "gen_ai.output.messages"));
+  assert.ok(output.startsWith('[{"content":"word word') && output.endsWith("..."));
+  assert.ok(output.length <= 16_384);
+});

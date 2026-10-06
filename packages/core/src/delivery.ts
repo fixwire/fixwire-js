@@ -8,12 +8,19 @@
  * server's Retry-After, up to 6 attempts. Other 4xx answers drop the
  * request. Fixwire-Rate-Limits pauses kinds of data: their requests wait
  * in the (bounded) queue until the pause ends, while the rest keeps flowing.
+ * Both pauses are capped at an hour.
  */
 
 export const BACKOFF_BASE = 1;
 export const BACKOFF_MAX = 300;
 export const MAX_ATTEMPTS = 6;
 const DEFAULT_RETRY_AFTER = 60;
+/** The longest pause a server can ask for (seconds): past 24.8 days timers fire at once. */
+const MAX_RETRY_AFTER = 3600;
+
+/** Seconds from a header, within [0, MAX_RETRY_AFTER]; 0 when it isn't a number. */
+const seconds = (v: string | null): number =>
+  Math.min(Math.max(Number(v) || 0, 0), MAX_RETRY_AFTER);
 
 /** One request to the ingest, as queued, retried and kept offline. */
 export interface Outbound {
@@ -43,8 +50,8 @@ export function parseRateLimits(header: string, now: number): Record<string, num
   const out: Record<string, number> = {};
   for (const limit of header.split(",")) {
     const [secs = "", cats = ""] = limit.trim().split(":");
-    const n = Number(secs);
-    if (secs === "" || !Number.isFinite(n)) continue;
+    if (secs === "" || !Number.isFinite(Number(secs))) continue;
+    const n = seconds(secs);
     for (const c of cats.split(";")) {
       const k = c.trim();
       out[k] = Math.max(out[k] ?? 0, now + n);
@@ -105,8 +112,7 @@ export class Delivery {
     header: (name: string) => string | null,
     now: number,
   ): Decision {
-    const after = Number(header("retry-after"));
-    const retryAfter = Number.isFinite(after) && after > 0 ? after : 0;
+    const retryAfter = seconds(header("retry-after"));
     const limits = header("fixwire-rate-limits");
     if (limits) {
       for (const [c, until] of Object.entries(parseRateLimits(limits, now)))

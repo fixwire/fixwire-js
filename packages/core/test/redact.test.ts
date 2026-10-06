@@ -65,6 +65,10 @@ for (const [name, text] of [
   ["a URL scheme that never ends", `${"a.".repeat(50_000)}://`],
   ["BEGIN lines without an END", `${BEGIN}RSA PRIVATE KEY-----\n`.repeat(3_000)],
   ["many URLs without a password", "x://u:".repeat(20_000)],
+  // As a regular expression the JWT detector took 16 s on these 200 kB.
+  ["JWT starts without the dots", "eyJ-".repeat(50_000)],
+  // Each finding was checked against every earlier one.
+  ["thirty thousand findings", "a@b.cc ".repeat(30_000)],
 ]) {
   test(`hostile text is masked in linear time: ${name}`, () => {
     const started = performance.now();
@@ -103,6 +107,14 @@ for (const [text, masked] of [
     assert.equal(new Redactor().mask(text)[0], masked);
   });
 }
+
+test("a JWT after hostile text is still found", () => {
+  const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJlMTIz";
+  const hostile = "eyJ-".repeat(1_000);
+  assert.equal(new Redactor().mask(`${hostile} ${jwt}`)[0], `${hostile} [REDACTED:jwt]`);
+  // Joined by "-" (a non-word character), the run is one token from its first "eyJ".
+  assert.equal(new Redactor().mask(`x ${hostile}${jwt}`)[0], "x [REDACTED:jwt]");
+});
 
 test("keys lower-case like the server", () => {
   // JavaScript lowers U+0130 to two code units; the server to "i".

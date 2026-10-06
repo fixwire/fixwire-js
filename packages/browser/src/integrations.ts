@@ -89,40 +89,63 @@ export const breadcrumbsIntegration = (): Integration => ({
     if (typeof g.fetch === "function" && !installed("breadcrumbs:fetch")) {
       const original = g.fetch;
       g.fetch = async function fixwireWrapped(input: RequestInfo | URL, init?: RequestInit) {
-        const url =
-          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-        const method = (
-          init?.method ?? (typeof input === "object" && "method" in input ? input.method : "GET")
-        ).toUpperCase();
         const start = Date.now();
+        let status = 0;
         try {
           const res = await original(input, init);
-          crumb(url, method, res.status, start);
+          status = res.status;
           return res;
-        } catch (err) {
-          crumb(url, method, 0, start);
-          throw err;
+        } finally {
+          crumb(input, init, status, start);
         }
       };
     }
   },
 });
 
-function crumb(url: string, method: string, status: number, start: number): void {
-  const client = getClient();
-  // Our own requests are not breadcrumbs.
-  if (!client || (client.dsn && url.startsWith(`${client.dsn.baseUrl}/`))) return;
-  client.addBreadcrumb({
-    category: "fetch",
-    type: "http",
-    level: status === 0 || status >= 500 ? "error" : status >= 400 ? "warning" : "info",
-    data: { url: url.split("?")[0], method, status_code: status, duration_ms: Date.now() - start },
-  });
+/** The breadcrumb of a fetch call. It never throws: the app gets its response as it was. */
+function crumb(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  status: number,
+  start: number,
+): void {
+  try {
+    // A Request, else a string or anything fetch turns into one (a URL).
+    const req = typeof input === "object" && "url" in input ? input : undefined;
+    const url = req ? req.url : String(input);
+    const method = String(init?.method ?? req?.method ?? "GET").toUpperCase();
+    const client = getClient();
+    // Our own requests are not breadcrumbs.
+    if (!client || (client.dsn && url.startsWith(`${client.dsn.baseUrl}/`))) return;
+    client.addBreadcrumb({
+      category: "fetch",
+      type: "http",
+      level: status === 0 || status >= 500 ? "error" : status >= 400 ? "warning" : "info",
+      data: {
+        url: url.split(/[?#]/)[0],
+        method,
+        status_code: status,
+        duration_ms: Date.now() - start,
+      },
+    });
+  } catch {
+    // never break the app's fetch
+  }
 }
 
+/**
+ * A logged value as JSON. Only its first values and characters: the message
+ * keeps 1024 characters, so logging a large object stays cheap.
+ */
 function safeString(v: unknown): string {
+  let budget = 1000;
   try {
-    return JSON.stringify(v) ?? String(v);
+    return (
+      JSON.stringify(v, (_k, x: unknown) =>
+        --budget < 0 ? undefined : typeof x === "string" ? x.slice(0, 1024) : x,
+      ) ?? String(v)
+    );
   } catch {
     return String(v);
   }
