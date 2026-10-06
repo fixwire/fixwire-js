@@ -5,3 +5,8 @@ dist/
 # Copied from the root by scripts/build.mjs
 packages/*/LICENSE
 packages/*/NOTICE
+
+.DS_Store
+.env
+.env.*
+!.env.example
