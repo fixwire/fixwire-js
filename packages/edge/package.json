@@ -1,6 +1,6 @@
 {
   "name": "@fixwire/edge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Fixwire SDK for edge runtimes: Cloudflare Workers, Vercel Edge, Deno and Netlify Edge Functions",
   "license": "MIT",
   "homepage": "https://github.com/fixwire/fixwire-js/tree/main/packages/edge#readme",

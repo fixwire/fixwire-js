@@ -42,7 +42,7 @@ test("feedback goes to /v1/feedback with its rating, trace and event", async () 
   assert.equal(first.release, "web@2");
   assert.equal(first.environment, "production");
   assert.equal(first.name, "ada");
-  assert.deepEqual(first.sdk, { name: "fixwire.javascript.test", version: "0.1.1" });
+  assert.deepEqual(first.sdk, { name: "fixwire.javascript.test", version: "0.1.2" });
   assert.equal(second.event_id, "9ec79c33ec9942ab8353589fcb2e04dc");
   assert.equal(second.score, 1, "scores are clamped to [-1, 1]");
   assert.equal(second.source, "api");

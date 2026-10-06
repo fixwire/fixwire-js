@@ -1,6 +1,6 @@
 {
   "name": "@fixwire/react",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Fixwire SDK for React: error boundaries and root error handlers",
   "license": "MIT",
   "homepage": "https://github.com/fixwire/fixwire-js/tree/main/packages/react#readme",
