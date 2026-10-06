@@ -28,14 +28,76 @@ const once = (name: string, fn: () => void): void => {
   fn();
 };
 
+/** How long a crashing process waits for its events to be sent. */
+const SHUTDOWN_TIMEOUT_MS = 2000;
+
+/** The SDK's process listeners, once installed. */
+let uncaughtListener: NodeJS.UncaughtExceptionListener | undefined;
+let rejectionListener: NodeJS.UnhandledRejectionListener | undefined;
+
+type ProcessEvent = "uncaughtException" | "unhandledRejection";
+/** `process`, typed for either event. */
+const emitter: NodeJS.EventEmitter = process;
+
+/** How many listeners of the app's (not the SDK's) an event has. */
+const appListeners = (event: ProcessEvent): number =>
+  emitter.listeners(event).filter((l) => l !== uncaughtListener && l !== rejectionListener).length;
+
+/** Takes a listener off until the next turn of the loop: meanwhile, Node does without it. */
+function standAside(
+  event: ProcessEvent,
+  listener: NodeJS.UncaughtExceptionListener | NodeJS.UnhandledRejectionListener | undefined,
+): void {
+  if (!listener) return;
+  emitter.removeListener(event, listener);
+  setImmediate(() => {
+    if (!emitter.listeners(event).includes(listener)) emitter.on(event, listener);
+  }).unref();
+}
+
+/**
+ * Node's `--unhandled-rejections` mode: the command line's, else
+ * NODE_OPTIONS' (the command line overrides it), else `throw`. Exported for
+ * tests.
+ */
+export function rejectionMode(
+  execArgv: readonly string[] = process.execArgv,
+  nodeOptions = process.env.NODE_OPTIONS ?? "",
+): string {
+  const last = (args: readonly string[]): string | undefined => {
+    let mode: string | undefined;
+    for (let i = 0; i < args.length; i++) {
+      const [name, value] = (args[i] ?? "").split("=", 2);
+      // Node reads `_` in an option's name as `-`.
+      if (name?.replace(/_/g, "-") === "--unhandled-rejections") mode = value ?? args[++i];
+    }
+    return mode;
+  };
+  const options = nodeOptions.replace(/"/g, "").split(/\s+/);
+  return last(execArgv) ?? last(options) ?? "throw";
+}
+
 /** Uncaught exceptions: reported as fatal, flushed, then Node's default (exit 1) unless the app handles them too. */
 export const onUncaughtExceptionIntegration = (): Integration => ({
   name: "OnUncaughtException",
   setup: () =>
     once("uncaught", () => {
-      const handler = (error: Error): void => {
+      const handler = (error: Error, origin?: string): void => {
         const client = getClient();
         const others = process.listeners("uncaughtException").filter((l) => l !== handler).length;
+        if (origin === "unhandledRejection" && rejectionListener) {
+          // `--unhandled-rejections=strict`: Node raises a rejection, then
+          // emits it. Unhandled, it is the rejection integration's (emitted
+          // next): it reports it and then crashes as Node would have.
+          if (others === 0) return;
+          // The app handles it: report it here, and leave the rejection to
+          // the app's listeners, else to Node's warning, as without the SDK.
+          standAside("unhandledRejection", rejectionListener);
+          client?.captureException(error, {
+            mechanism: { type: "onunhandledrejection", handled: false },
+          });
+          return;
+        }
         client?.captureException(error, {
           mechanism: { type: "onuncaughtexception", handled: false },
         });
@@ -44,26 +106,61 @@ export const onUncaughtExceptionIntegration = (): Integration => ({
         // Node would exit now; keep the loop alive (our timers are unref'd)
         // until the event is sent, then exit as Node does.
         process.exitCode = 1;
-        const keepAlive = setTimeout(() => undefined, 2500);
-        void (client ? client.close(2000) : Promise.resolve(true)).finally(() => {
+        const keepAlive = setTimeout(() => undefined, SHUTDOWN_TIMEOUT_MS + 500);
+        void (client ? client.close(SHUTDOWN_TIMEOUT_MS) : Promise.resolve(true)).finally(() => {
           clearTimeout(keepAlive);
           process.exit(1);
         });
       };
+      uncaughtListener = handler;
       process.on("uncaughtException", handler);
     }),
 });
 
-/** Unhandled promise rejections: reported, with Node's own warning left in place. */
+/**
+ * Hands a rejection back to Node with the SDK's listeners off, so Node does
+ * what it would have done without the SDK: raise it as an uncaught exception
+ * (to the app's handlers, else printed, exit code 1), or warn.
+ */
+function handBack(reason: unknown): void {
+  standAside("uncaughtException", uncaughtListener);
+  standAside("unhandledRejection", rejectionListener);
+  void Promise.reject(reason);
+}
+
+/**
+ * Unhandled promise rejections: reported, then handled as Node's
+ * `--unhandled-rejections` mode would without the SDK's listener (listening
+ * alone stops the default mode's crash). Where Node would crash (`throw`
+ * with no listener of the app's, or `strict` with no `uncaughtException`
+ * handler), the event is flushed first, within the shutdown timeout.
+ */
 export const onUnhandledRejectionIntegration = (): Integration => ({
   name: "OnUnhandledRejection",
   setup: () =>
     once("rejection", () => {
-      process.on("unhandledRejection", (reason) => {
-        getClient()?.captureException(reason, {
+      const mode = rejectionMode();
+      const handler = (reason: unknown): void => {
+        const client = getClient();
+        client?.captureException(reason, {
           mechanism: { type: "onunhandledrejection", handled: false },
         });
-      });
+        const unheard = appListeners("unhandledRejection") === 0;
+        if (
+          (mode === "throw" && unheard) ||
+          (mode === "strict" && appListeners("uncaughtException") === 0)
+        ) {
+          // Node would crash now: send the event first.
+          void (client ? client.flush(SHUTDOWN_TIMEOUT_MS) : Promise.resolve(true)).finally(() =>
+            handBack(reason),
+          );
+        } else if (mode === "warn-with-error-code" && unheard) {
+          handBack(reason); // a warning and exit code 1
+        }
+        // `warn` warns, `none` stays silent, with listeners or without.
+      };
+      rejectionListener = handler;
+      process.on("unhandledRejection", handler);
     }),
 });
 

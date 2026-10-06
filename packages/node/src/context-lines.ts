@@ -12,6 +12,8 @@ const MAX_FILES = 64;
 const MAX_CACHE_BYTES = 32 << 20;
 /** Larger files (bundles, data) get no context lines. */
 const MAX_FILE_BYTES = 10 << 20;
+/** What is read: JavaScript and TypeScript sources, never another file a faked stack names. */
+const SOURCE_FILE = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 const cache = new Map<string, { lines: string[] | null; bytes: number }>();
 let cachedBytes = 0;
 
@@ -57,7 +59,8 @@ export async function addContextLines(event: Event): Promise<void> {
         !f.filename ||
         !f.lineno ||
         f.context_line !== undefined ||
-        f.filename.startsWith("node:")
+        f.filename.startsWith("node:") ||
+        !SOURCE_FILE.test(f.filename)
       )
         continue;
       const lines = await linesOf(f.filename);

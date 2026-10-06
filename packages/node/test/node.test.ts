@@ -184,6 +184,120 @@ test("an uncaught exception is reported before the process exits", async () => {
   assert.equal(event?.attributes["fixwire.handled"], false);
 });
 
+test("an unhandled rejection is reported once, then Node does what its mode says", async () => {
+  const index = new URL("../src/index.ts", import.meta.url).href;
+  // The same app with the SDK and without: only init() differs.
+  const script = `
+    const Fixwire = await import(${JSON.stringify(index)});
+    if (process.env.TEST_DSN) Fixwire.init({ dsn: process.env.TEST_DSN });
+    const on = process.env.TEST_LISTENER;
+    if (on === "unhandledRejection") process.on(on, (r) => console.log("app:", String(r)));
+    if (on === "uncaughtException") process.on(on, (e, origin) => console.log("app:", origin, String(e)));
+    setTimeout(() => Fixwire.close(), 50);
+    Promise.reject(process.env.TEST_REASON === "42" ? 42 : new Error("boom"));
+  `;
+  const run = (flags: string[], env: Record<string, string>) =>
+    new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
+      const child = spawn(
+        process.execPath,
+        ["--conditions=fixwire-source", ...flags, "--input-type=module", "-e", script],
+        { env: { ...process.env, NODE_OPTIONS: "", ...env } },
+      );
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (c) => (stdout += c));
+      child.stderr.on("data", (c) => (stderr += c));
+      child.on("close", (code) => {
+        // Process and rejection ids differ from run to run. Above a crash's
+        // stack, Node shows the line that made the error until its stack is
+        // read (reporting it reads it), then its own: compared without.
+        stderr = stderr
+          .replace(/\(node:\d+\)/g, "(node)")
+          .replace(/rejection id: \d+/g, "id")
+          .replace(/^.*\n.*\n *\^+\n\n/, "");
+        resolve({ code, stdout, stderr });
+      });
+    });
+  const crash = /^Error: boom\n {4}at [\s\S]*\nNode\.js v/;
+  const warning = /^\(node\) UnhandledPromiseRejectionWarning: Error: boom/;
+  const silent = /^$/;
+  const mode = (m: string) => [`--unhandled-rejections=${m}`];
+  const cases = [
+    { flags: [], code: 1, stderr: crash },
+    { flags: [], reason: "42", code: 1, stderr: /^UnhandledPromiseRejection: [\s\S]*\nNode\.js v/ },
+    { flags: [], listener: "unhandledRejection", code: 0, stderr: silent },
+    { flags: mode("throw"), listener: "uncaughtException", code: 0, stderr: silent },
+    { flags: mode("strict"), code: 1, stderr: crash },
+    {
+      flags: [],
+      nodeOptions: "--unhandled-rejections=strict",
+      listener: "unhandledRejection",
+      code: 1,
+      stderr: crash,
+    },
+    { flags: mode("strict"), listener: "uncaughtException", code: 0, stderr: warning },
+    { flags: mode("warn"), code: 0, stderr: warning },
+    { flags: mode("warn"), listener: "unhandledRejection", code: 0, stderr: warning },
+    { flags: mode("none"), code: 0, stderr: silent },
+    { flags: mode("none"), listener: "unhandledRejection", code: 0, stderr: silent },
+    { flags: mode("warn-with-error-code"), code: 1, stderr: warning },
+    {
+      flags: mode("warn-with-error-code"),
+      listener: "unhandledRejection",
+      code: 0,
+      stderr: silent,
+    },
+  ];
+  const results = await Promise.all(
+    cases.map(async (c) => {
+      const env = {
+        NODE_OPTIONS: c.nodeOptions ?? "",
+        TEST_LISTENER: c.listener ?? "",
+        TEST_REASON: c.reason ?? "",
+      };
+      const { server, dsn, got } = await ingest();
+      const [without, withSdk] = await Promise.all([
+        run(c.flags, env),
+        run(c.flags, { ...env, TEST_DSN: dsn }),
+      ]);
+      server.close();
+      return { c, without, withSdk, reported: events(got) as Json[] };
+    }),
+  );
+  for (const { c, without, withSdk, reported } of results) {
+    const label = JSON.stringify({ ...c, stderr: undefined });
+    assert.equal(without.code, c.code, label);
+    assert.match(without.stderr, c.stderr, label);
+    assert.equal(withSdk.code, without.code, label);
+    assert.equal(withSdk.stderr, without.stderr, label);
+    // Strict mode crashes before the app's rejection listener would run;
+    // with the SDK it runs while the event is sent.
+    if (!(c.nodeOptions && c.listener === "unhandledRejection"))
+      assert.equal(withSdk.stdout, without.stdout, label);
+    assert.equal(reported.length, 1, label);
+    assert.equal(thrown(reported[0] as Json).mechanism.type, "onunhandledrejection", label);
+    assert.equal(reported[0]?.attributes["fixwire.handled"], false, label);
+  }
+});
+
+test("the rejection mode is the command line's, else NODE_OPTIONS', else throw", async () => {
+  const { rejectionMode } = await import("../src/integrations.ts");
+  assert.equal(rejectionMode([], ""), "throw");
+  assert.equal(rejectionMode(["--unhandled-rejections", "none"], ""), "none");
+  assert.equal(
+    rejectionMode(["--unhandled-rejections=warn", "--unhandled-rejections=strict"], ""),
+    "strict",
+  );
+  assert.equal(
+    rejectionMode(["--unhandled-rejections=warn"], "--unhandled-rejections=strict"),
+    "warn",
+  );
+  assert.equal(
+    rejectionMode([], '--max-old-space-size=64 --unhandled_rejections="strict"'),
+    "strict",
+  );
+});
+
 test("events carry the request, privately, and the Express route", async () => {
   const { server: ingestServer, dsn, got } = await ingest();
   const client = Fixwire.init({ dsn });
@@ -488,7 +602,7 @@ test("serverless: each invocation is its own segment, errors are reported and fl
 });
 
 test("context lines come only from regular files of a source file's size", async () => {
-  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { mkdtempSync, symlinkSync, writeFileSync } = await import("node:fs");
   const { spawnSync } = await import("node:child_process");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
@@ -500,11 +614,16 @@ test("context lines come only from regular files of a source file's size", async
   writeFileSync(largest, "x();\n".repeat(2 << 20)); // 10 MB
   const big = join(dir, "big.js");
   writeFileSync(big, `${"x();\n".repeat(2 << 20)}\n`); // a byte more
-  // A frame's path is text a message can fake: a FIFO would block forever,
-  // /dev/zero would be read until memory runs out.
-  const fifo = join(dir, "fifo");
-  const special = process.platform === "win32" ? [] : ["/dev/zero"];
-  if (process.platform !== "win32" && spawnSync("mkfifo", [fifo]).status === 0) special.push(fifo);
+  // A frame's path is text a message can fake, a source file's name too: a
+  // FIFO would block forever, /dev/zero would be read until memory runs out.
+  const fifo = join(dir, "fifo.js");
+  const zero = join(dir, "zero.js");
+  const special: string[] = [];
+  if (process.platform !== "win32") {
+    symlinkSync("/dev/zero", zero);
+    special.push(zero);
+    if (spawnSync("mkfifo", [fifo]).status === 0) special.push(fifo);
+  }
   const frames = [small, largest, big, ...special].map((filename) => ({
     filename,
     lineno: 2,
@@ -537,6 +656,34 @@ test("context lines come only from regular files of a source file's size", async
     });
   }
   assert.ok(cached().bytes <= 32 << 20, `${cached().bytes} bytes`);
+});
+
+test("context lines come only from source files, whatever a faked stack names", async () => {
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "fixwire-source-"));
+  const notes = join(dir, "notes.txt");
+  writeFileSync(notes, "first\nsecond\nthird\n");
+  const app = join(dir, "app.ts");
+  writeFileSync(app, "a();\nthrow new Error('x');\nb();\n");
+  const { server, dsn, got } = await ingest();
+  const client = Fixwire.init({ dsn, defaultIntegrations: false });
+  // Not V8's: a duck-typed error whose stack names any file it likes.
+  const faked = {
+    message: "faked",
+    stack: `Error: faked\n    at a (/etc/passwd:1:1)\n    at b (${notes}:2:1)\n    at c (${app}:2:1)`,
+  };
+  Fixwire.captureException(faked);
+  assert.ok(await client.flush(5000));
+  await Fixwire.close();
+  server.close();
+  const frames = thrown(events(got)[0] as Json).frames as Json[];
+  const line = (file: string) => frames.find((f) => f.file === file)?.context_line;
+  assert.equal(frames.length, 3);
+  assert.equal(line("/etc/passwd"), undefined);
+  assert.equal(line(notes), undefined);
+  assert.equal(line(app), "throw new Error('x');");
 });
 
 test("the file spool is private to its user and sends only to the ingest", async () => {

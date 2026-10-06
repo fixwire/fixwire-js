@@ -102,7 +102,7 @@ The SDK never keeps the process alive: at the end of a short script,
 
 | Integration | What it does | How to use |
 |---|---|---|
-| Uncaught errors | Uncaught exceptions (reported as fatal, flushed, then the process exits as Node.js would) and unhandled rejections | On by default |
+| Uncaught errors | Uncaught exceptions (reported as fatal, flushed, then the process exits as Node.js would) and unhandled rejections (reported, then handled as your `--unhandled-rejections` mode says: see below) | On by default |
 | HTTP servers | A scope per request (`setUser`, `setTag` and breadcrumbs stay with it), the caller's trace continued, a segment per request named after its route, request sessions; Express and any server on `node:http` | On by default |
 | Express | 5xx errors (sync and async) with the request and the route; 4xx are not reported | `Fixwire.setupExpressErrorHandler(app)` after your routes |
 | Outgoing HTTP | `http`, `https` and `fetch` calls become child spans with an `http` breadcrumb, and carry trace headers (W3C `traceparent` and `tracestate`; `baggage` passes through) to `tracePropagationTargets`; headers on `http` and `https` calls need Node.js 22.14+ | On by default |
@@ -125,6 +125,21 @@ app.get("/orders/:id", (req, res) => res.json(loadOrder(req.params.id)));
 Fixwire.setupExpressErrorHandler(app); // after your routes
 app.listen(3000);
 ```
+
+An unhandled rejection does what it would without the SDK. Node.js
+crashes on one only while nobody listens for them, so once it is reported,
+the SDK hands it back to Node.js, in the mode `--unhandled-rejections`
+sets on the command line or in `NODE_OPTIONS`:
+
+| Mode | After the report |
+|---|---|
+| `throw` (the default) | Without an `unhandledRejection` listener of yours: flushed (2 seconds at most), then raised as an uncaught exception, to your `uncaughtException` handlers, else Node.js prints it and exits with code 1 |
+| `strict` | Raised as an uncaught exception first: without an `uncaughtException` handler of yours, flushed, then Node.js prints it and exits with code 1 |
+| `warn-with-error-code` | Without an `unhandledRejection` listener of yours: Node.js's warning and exit code 1 |
+| `warn`, `none` | Node.js's warning, or nothing |
+
+Reporting reads the error's stack, so above a crash's stack Node.js shows
+its own source line, as for any error whose stack was read.
 
 The [repository README](https://github.com/fixwire/fixwire-js#-integrations)
 shows each integration with a sample.

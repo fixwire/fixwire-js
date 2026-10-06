@@ -128,7 +128,7 @@ seconds at most).
 
 | Integration | What it does | How to use |
 |---|---|---|
-| Uncaught errors (Node.js) | Uncaught exceptions (reported as fatal, flushed, then the process exits as Node.js would) and unhandled rejections | On by default in `@fixwire/node` |
+| Uncaught errors (Node.js) | Uncaught exceptions (reported as fatal, flushed, then the process exits as Node.js would) and unhandled rejections (reported, flushed, then what your `--unhandled-rejections` mode does: by default, a crash with exit code 1) | On by default in `@fixwire/node` |
 | HTTP servers (Node.js) | A scope per request, the caller's trace continued, a segment per request named after its route, request sessions; Express and any server on `node:http` | On by default in `@fixwire/node` |
 | Express | 5xx errors (sync and async) with the request and the route; 4xx are not reported | `Fixwire.setupExpressErrorHandler(app)` after your routes |
 | Outgoing HTTP (Node.js) | `http`, `https` and `fetch` calls become child spans with an `http` breadcrumb, and carry trace headers to your targets | On by default in `@fixwire/node` |

@@ -15,6 +15,9 @@ API.
 - `@fixwire/core`: tool calls serialize and hash their arguments only when their span is sent; streamed AI answers are buffered only when content is recorded, and only as much as is recorded.
 - `@fixwire/core`: an invalid DSN's error no longer repeats the DSN.
 - `@fixwire/node`: context lines are read only from regular files up to 10 MB, through a cache of 64 files and 32 MB; a faked frame path (a device, a FIFO, `/proc`) is never opened.
+- `@fixwire/node`: context lines are read only from source files (`.js`, `.mjs`, `.cjs`, `.jsx`, `.ts`, `.mts`, `.cts`, `.tsx`); a faked stack naming `/etc/passwd` or a `.txt` file gets none.
+- `@fixwire/node`: an unhandled rejection crashes the process again as Node.js would (`--unhandled-rejections=throw`, the default, or `strict`): reported once, flushed within 2 s, then handed back to Node.js, which prints it and exits with code 1 (or calls the app's `uncaughtException` handlers). The SDK's listener had turned the crash off.
+- `@fixwire/node`: `warn-with-error-code` sets exit code 1 again, and `strict` warns when the app's `uncaughtException` handler takes the rejection, as without the SDK; the mode is read from the command line and `NODE_OPTIONS`.
 - `@fixwire/node`: the offline spool's directories are 0700 and its files 0600, the default directory under the shared temp directory is used only when it is the user's own, a stored request whose path isn't one is dropped, and writing a request no longer reads the whole directory.
 - `@fixwire/node`: deliveries time out after 10 s in all, not only after 10 s of silence.
 - `@fixwire/node`: an integration that fails (e.g. a `tracePropagationTargets` entry that throws) no longer crashes the app from a `diagnostics_channel` subscriber.
