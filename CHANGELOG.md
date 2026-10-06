@@ -4,6 +4,11 @@ All notable changes to the Fixwire JavaScript SDKs are listed here. Versions fol
 Versioning](https://semver.org); before 1.0, a minor version may change the
 API.
 
+## [Unreleased]
+
+- `@fixwire/browser`: the gecko (Firefox, Safari) stack line parser is one scan, linear in the line, giving the frames its expression gave; a 1 KB line of parentheses took the expression most of a second, 100 KB now take milliseconds. Its eval expression tries each word once.
+- `@fixwire/core`: a tool call's arguments hash reads at most the first 16,384 bytes of the arguments' JSON, and the JSON's length when it is longer, as the Python SDK does (1.6 MB of JSON took over 100 ms). Hashes of shorter JSON are unchanged.
+
 ## [0.1.1] - 2026-10-06
 
 - `@fixwire/core`: error budgets' message templates, the JWT detector and overlapping findings in redaction take linear time; hostile messages, keys, feedback or span attributes stalled the app for seconds to minutes.

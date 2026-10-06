@@ -186,10 +186,15 @@ test("argument hashes ignore key order and match the Python SDK", () => {
   assert.equal(argumentsHash({ id: "ord_1" }), "e665776feba25695");
   // Values from the Python SDK's arguments_hash: strings cut at 16 kB of
   // UTF-8, keys in code point order, NaN and the infinities as strings,
-  // small numbers with Python's exponent.
+  // small numbers with Python's exponent, lone surrogates escaped; JSON over
+  // 16,384 bytes hashed as its first 16,384 and its length.
   for (const [value, hash] of [
-    ["é".repeat(9000), "64715d9755826399"],
-    ["😀".repeat(5000), "34cdd5172f496434"],
+    ["é".repeat(9000), "817acd82648064e0"],
+    ["😀".repeat(5000), "034a133f00c743ff"],
+    ["a".repeat(16_382), "cab48f29cc204e73"], // 16,384 bytes with the quotes: all of them
+    ["a".repeat(16_383), "29822d3f4ff5cd07"],
+    [{ chunks: Array(100).fill("x".repeat(20_000)) }, "8c93db9c92660095"], // 1.6 MB of JSON
+    [{ a: "\ud800" }, "870bca4fbe3610bd"],
     [{ "￿": 1, "😀": 2, a: 3, Z: 4, é: 5, "": 6 }, "4861fa96bf28595f"],
     [
       [
@@ -210,9 +215,29 @@ test("argument hashes ignore key order and match the Python SDK", () => {
       "ac7f6ce6ab7edfe7",
     ],
     [[Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY], "e3b44446d407a015"],
-    [{ ["k".repeat(17_000)]: "long key" }, "f1b57e73eb9fb945"],
+    [{ ["k".repeat(17_000)]: "long key" }, "5fd4d5d8c3e1e1de"],
   ] as const)
     assert.equal(argumentsHash(value), hash, JSON.stringify(value).slice(0, 40));
+});
+
+test("a 2 MB argument hashes in a few milliseconds, by its first 16 kB and its length", () => {
+  // A hundred 20 kB strings: 1.6 MB of JSON once each is cut to 16 kB.
+  const big = (last = "x".repeat(20_000)) => ({
+    chunks: [...Array(99).fill("x".repeat(20_000)), last],
+  });
+  const args = big();
+  argumentsHash(args); // warm up
+  let ms = Number.POSITIVE_INFINITY;
+  for (let k = 0; k < 3; k++) {
+    const started = performance.now();
+    argumentsHash(args);
+    ms = Math.min(ms, performance.now() - started);
+  }
+  assert.ok(ms < 50, `${ms} ms`); // all 1.6 MB through FNV took over 100 ms
+  // Past the first 16 kB only the length counts: the same call hashes the
+  // same, and one whose JSON is longer or shorter differently.
+  assert.equal(argumentsHash(big("y".repeat(20_000))), argumentsHash(args));
+  assert.notEqual(argumentsHash(big("x")), argumentsHash(args));
 });
 
 test("a failed or abandoned model call still ends its span", async () => {

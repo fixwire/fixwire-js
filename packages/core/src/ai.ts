@@ -133,14 +133,29 @@ function canonical(value: unknown, limit = MAX_AI_CONTENT): string {
   return write(normalize(value, limit));
 }
 
-/** FNV-1a 64 of the UTF-8 text, as 16 hex digits (the Python SDK computes the same). */
+/** The canonical JSON's bytes the arguments hash reads (the rest adds only its length). */
+const HASHED_BYTES = 16_384;
+
+/**
+ * FNV-1a 64 of the canonical JSON, as 16 hex digits: of its first 16,384 bytes of UTF-8 and,
+ * when it is longer, of its length in bytes (8, little-endian); the byte loop ran over all of
+ * up to 1.6 MB. The Python SDK computes the same.
+ */
 export function argumentsHash(value: unknown): string {
-  let h = 0xcbf29ce484222325n;
-  for (const b of new TextEncoder().encode(canonical(value))) {
-    h ^= BigInt(b);
-    h = (h * 0x100000001b3n) & 0xffffffffffffffffn;
-  }
-  return h.toString(16).padStart(16, "0");
+  const data = new TextEncoder().encode(canonical(value));
+  // 64 bits as two 32-bit halves: × 0x100000001b3 is × 0x1b3 plus the low half shifted by 40.
+  let hi = 0xcbf29ce4;
+  let lo = 0x84222325;
+  const add = (b: number) => {
+    const x = (lo ^ b) >>> 0;
+    const t = x * 0x1b3;
+    hi = (hi * 0x1b3 + Math.floor(t / 2 ** 32) + (x << 8)) >>> 0;
+    lo = t >>> 0;
+  };
+  data.subarray(0, HASHED_BYTES).forEach(add);
+  for (let k = 0; data.length > HASHED_BYTES && k < 8; k++)
+    add(Math.floor(data.length / 256 ** k) % 256);
+  return hi.toString(16).padStart(8, "0") + lo.toString(16).padStart(8, "0");
 }
 
 const content = (value: unknown): string =>

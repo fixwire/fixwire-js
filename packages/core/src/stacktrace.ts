@@ -26,18 +26,13 @@ export function createStackParser(...parsers: StackLineParser[]): StackParser {
     const lines = stack.split("\n");
 
     for (let i = skipFirstLines; i < lines.length; i++) {
-      let line = lines[i] as string;
       // Truncate lines over 1kb because many of the regular expressions use
       // backtracking which results in run time that increases exponentially
       // with input size.
-      if (line.length > 1024) {
-        line = line.slice(0, 1024);
-      }
+      const line = (lines[i] as string).slice(0, 1024);
 
-      // Remove webpack (error: *) wrappers
-      const cleanedLine = WEBPACK_ERROR_REGEXP.test(line)
-        ? line.replace(WEBPACK_ERROR_REGEXP, "$1")
-        : line;
+      // Remove webpack (error: *) wrappers (a line without one stays as it is)
+      const cleanedLine = line.replace(WEBPACK_ERROR_REGEXP, "$1");
 
       // Skip Error: lines (includes(), not a regex, to avoid O(n²) backtracking on long lines)
       if (cleanedLine.includes("Error: ")) {

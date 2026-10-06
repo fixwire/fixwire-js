@@ -7,9 +7,11 @@ import {
   defaultStackParser,
   globalHandlersIntegration,
   noiseFilter,
+  type StackFrame,
   type TransportRequest,
 } from "../src/index.ts";
 import { makeIndexedDbSpool } from "../src/offline.ts";
+import { geckoStackLineParser } from "../src/stack-parsers.ts";
 
 /** What a fetch was given, as the decoding helpers read requests. */
 const asRequest = (url: string, init: RequestInit | undefined): TransportRequest => ({
@@ -279,6 +281,130 @@ test("hostile stack lines parse quickly, and a message's lines are not frames", 
   assert.ok(performance.now() - started < 1000, `${performance.now() - started} ms`);
   const files = (ex?.stacktrace?.frames ?? []).map((f) => f.filename);
   assert.ok(files.length > 0 && !files.some((f) => f?.includes("evil")), String(files));
+});
+
+/** The gecko parser as it was, an expression that backtracked polynomially: the oracle. */
+const geckoBefore = (line: string): StackFrame | undefined => {
+  const parts =
+    /^(.*?)(?:\((.*?)\))?(?:^|@)?((?:[-a-z]+)?:\/.*?|\[native code\]|[^@]*(?:bundle|\d\.js)|\/[\w\-. /=]+)(?::(\d+))?(?::(\d+))?$/i.exec(
+      line.trim(),
+    );
+  if (!parts) return undefined;
+  let [, func, , filename = "", lineno, colno] = parts;
+  const sub =
+    filename.includes(" > eval") && /(\S+) line (\d+)(?: > eval line \d+)* > eval/i.exec(filename);
+  if (sub) [func, filename, lineno, colno] = [func || "eval", sub[1] as string, sub[2], ""];
+  func ||= "?";
+  const safari = func.includes("safari-extension")
+    ? "safari-extension"
+    : func.includes("safari-web-extension") && "safari-web-extension";
+  if (safari)
+    [func, filename] = [
+      func.includes("@") ? (func.split("@")[0] as string) : "?",
+      `${safari}:${filename}`,
+    ];
+  const frame: StackFrame = {
+    filename,
+    function: func === "<anonymous>" ? "?" : func,
+    in_app: true,
+  };
+  if (lineno) frame.lineno = +lineno;
+  if (colno) frame.colno = +colno;
+  return frame;
+};
+
+test("the gecko parser gives the frames the expression gave, on realistic and hostile lines", () => {
+  const realistic = [
+    "addToCart@https://shop.example.com/assets/app.js:1:2345",
+    "@https://shop.example.com/assets/app.js:3:1",
+    "global code@https://shop.example.com/app.js:9:1",
+    "http://path/to/file.js:2:3",
+    "dumpException3@http://localhost:8080/file.js:41",
+    "[native code]",
+    "forEach@[native code]",
+    "foo@http://localhost:8080/file.js line 26 > eval:2:96",
+    "@http://localhost:8080/file.js line 26 > eval line 1 > eval:1:1",
+    "trace@file:///C:/example.html:9:17",
+    'obj["@fn"]@file:///C:/example.html:7:17',
+    "ClipperError@safari-extension:(//3284871F-A480-4FFC-8BC4-3F362C752446/2665fee0/commons.js:223036:10)",
+    "p_@safari-web-extension://46434E60-F5BD-48A4-80C8-A422C5D16897/scripts/contentScript.js:29:33314",
+    "value@index.android.bundle:12:1917",
+    "value@1.js:1:1",
+    "foo/<@http://path/to/file.js:41:13",
+    "[2]</Bar.prototype._baz/</<@http://path/to/file.js:703:28",
+    'foo("arg")@http://path/to/file.js:2:3',
+    "foo@/static/js/main.js:10:20",
+    "<anonymous>@http://example.com/a.js:1:1",
+    "async*foo@moz-extension://abc-def/content.js:5:7",
+    "foo@http://x/a.js LINE 2 > EVAL line 3 > eval:1:1",
+    `foo@http://x/a${String.fromCharCode(0x2028)}b.js:1:2`, // `.` takes no line terminator
+  ];
+  // What the lines are made of; hostile lines repeat the first 17.
+  const pieces = "( ) @ : / :/ a Z 1 . - _ =".split(" ");
+  pieces.push(" ", "\t", "\r", String.fromCharCode(0x2028), "js", "1.js", "bundle", "BUNDLE");
+  pieces.push("[native code]", "[Native Code]", "http://x.js", " line 2", " > eval", " > EVAL");
+  pieces.push("safari-extension", "safari-web-extension", "<anonymous>", ":12", ":3:4", "é", "ſ");
+  let seed = 1;
+  const rnd = (n: number) => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed % n;
+  };
+  const pick = <T>(xs: T[]) => xs[rnd(xs.length)] as T;
+  const random = () => Array.from({ length: rnd(20) }, () => pick(pieces)).join("");
+  const mutated = (s = pick(realistic)) => {
+    for (let k = 1 + rnd(4); k--; ) {
+      const at = rnd(s.length + 1);
+      s = s.slice(0, at) + (rnd(2) ? pick(pieces) : "") + s.slice(at + rnd(3));
+    }
+    return s;
+  };
+  const run = () => pick(pieces.slice(0, 17)).repeat(1 + rnd(16));
+  const hostile = () => Array.from({ length: 1 + rnd(4) }, run).join("");
+  const kinds = [random, mutated, hostile, () => hostile() + pick(realistic)];
+  const gecko = geckoStackLineParser[1];
+  let differences = 0;
+  let first = "";
+  for (let n = 0; n < 20_000; n++) {
+    const line = n < realistic.length ? (realistic[n] as string) : pick(kinds)();
+    if (JSON.stringify(gecko(line)) !== JSON.stringify(geckoBefore(line))) {
+      differences++;
+      first ||= `${JSON.stringify(line)}: ${JSON.stringify(gecko(line))}`;
+    }
+  }
+  assert.equal(differences, 0, first);
+});
+
+test("the gecko parser takes time linear in the line", () => {
+  // The expression took most of a second on 1 KB of parentheses, and four
+  // times as long on twice as many: these lines would take it for ever.
+  const gecko = geckoStackLineParser[1];
+  // Milliseconds of CPU a parse takes (other tests run meanwhile), the best of
+  // a few rounds in which each line is parsed three times.
+  const cpu = (lines: string[]) => {
+    const best = lines.map(() => Number.POSITIVE_INFINITY);
+    for (let round = 0; round < 5; round++)
+      lines.forEach((line, i) => {
+        const started = process.cpuUsage();
+        for (let k = 0; k < 3; k++) gecko(line);
+        const { user, system } = process.cpuUsage(started);
+        best[i] = Math.min(best[i] as number, (user + system) / 3000);
+      });
+    return best;
+  };
+  const shapes = [
+    (n: number) => "(".repeat(n / 2) + ")".repeat(n / 2),
+    (n: number) => `${"(".repeat(n / 2)}${")".repeat(n / 2 - 3)}@/a`,
+    (n: number) => "()@:".repeat(n / 4),
+    (n: number) => "(@:/".repeat(n / 4),
+    (n: number) => `@http://${"a".repeat(n)} > eval`,
+  ];
+  for (const shape of shapes) {
+    const ms = cpu([10_000, 50_000, 100_000].map(shape));
+    const [ms10k = 0, ms50k = 0, ms100k = 0] = ms;
+    const what = `${JSON.stringify(shape(8))}: ${ms.map((t) => t.toFixed(2)).join(", ")} ms`;
+    assert.ok(ms10k < 50 && ms100k < 250, what);
+    assert.ok(ms100k < 3 * ms50k + 1, what); // twice the line, about twice the time
+  }
 });
 
 test("breadcrumbs never break the app's fetch or console calls, and stay cheap", async () => {
