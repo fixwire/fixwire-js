@@ -1,6 +1,6 @@
 {
   "name": "@fixwire/node",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Fixwire SDK for Node.js",
   "license": "MIT",
   "homepage": "https://github.com/fixwire/fixwire-js/tree/main/packages/node#readme",

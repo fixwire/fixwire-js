@@ -1,6 +1,6 @@
-/** DSNs: `{scheme}://{key}@{host}[:{port}][/{path}]` (sdks/PROTOCOL.md §1). */
+/** DSNs: `{scheme}://{key}@{host}[:{port}][/{path}]` (fixwire-protocol §1). */
 
-export const SDK_VERSION = "0.1.0";
+export const SDK_VERSION = "0.1.1";
 
 export interface Dsn {
   protocol: string;

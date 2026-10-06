@@ -1,4 +1,4 @@
-// The wire: what the SDK sends where (sdks/PROTOCOL.md).
+// The wire: what the SDK sends where (fixwire-protocol).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -65,7 +65,7 @@ test("an error is one OTLP log record on /v1/logs, its chain outermost first", a
     "deployment.environment.name": "staging",
     "host.name": "web-1",
     "telemetry.sdk.name": "fixwire.javascript.test",
-    "telemetry.sdk.version": "0.1.0",
+    "telemetry.sdk.version": "0.1.1",
     "telemetry.sdk.language": "nodejs",
   });
   assert.equal(r.eventName, "exception");

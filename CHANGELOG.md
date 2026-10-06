@@ -4,7 +4,7 @@ All notable changes to the Fixwire JavaScript SDKs are listed here. Versions fol
 Versioning](https://semver.org); before 1.0, a minor version may change the
 API.
 
-## [Unreleased]
+## [0.1.1] - 2026-10-06
 
 - `@fixwire/core`: error budgets' message templates, the JWT detector and overlapping findings in redaction take linear time; hostile messages, keys, feedback or span attributes stalled the app for seconds to minutes.
 - `@fixwire/core`: a server's `Retry-After` (seconds or an HTTP date) or `Fixwire-Rate-Limits` pause is capped at a day (a huge one spun a timer in a loop); broken values and unknown categories are ignored.

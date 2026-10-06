@@ -1,6 +1,6 @@
 {
   "name": "@fixwire/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Fixwire SDK core: client, scopes, redaction, budgets, delivery",
   "license": "MIT",
   "homepage": "https://github.com/fixwire/fixwire-js/tree/main/packages/core#readme",
