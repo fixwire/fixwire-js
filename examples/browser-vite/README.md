@@ -32,7 +32,7 @@ Deploy `dist/` after the upload (the debug ids are now part of the files),
 without the `.map` files. Errors from that build arrive with original file
 names, functions, lines and source.
 
-The SDK adds about 12 KB gzipped to the page, 15 KB with tracing. The
+The SDK adds about 16 KB gzipped to the page, 19 KB with tracing. The
 offline store is a separate import (`offline: makeIndexedDbSpool` from
 `@fixwire/browser/offline`, 0.5 KB more): events captured on a dropped
 connection are kept in IndexedDB and sent when the browser is back online.
