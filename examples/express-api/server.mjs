@@ -122,8 +122,19 @@ const server = app.listen(Number(process.env.PORT ?? 3000), () => {
   console.log(`listening on ${server.address().port}`);
 });
 
-process.on("SIGTERM", async () => {
+// When stopped, send what is queued before exiting. SIGTERM is how containers and service
+// managers stop a program, Ctrl-C sends SIGINT; on Windows, where a program gets no signals
+// from another, process managers send a "shutdown" message instead (PM2's convention).
+let stopping = false;
+async function stop() {
+  if (stopping) return;
+  stopping = true;
   server.close();
-  await Fixwire.close(2000); // send what is queued before exiting
+  await Fixwire.close(2000);
   process.exit(0);
+}
+process.on("SIGTERM", stop);
+process.on("SIGINT", stop);
+process.on("message", (message) => {
+  if (message === "shutdown") stop();
 });

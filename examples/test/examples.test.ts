@@ -83,7 +83,8 @@ test("express-api", async () => {
   const app = spawn(process.execPath, ["--conditions=fixwire-source", "server.mjs"], {
     cwd: join(here, "express-api"),
     env: { ...process.env, FIXWIRE_DSN: dsn, PORT: "0" },
-    stdio: ["ignore", "pipe", "inherit"],
+    // A channel for the "shutdown" message Windows process managers send.
+    stdio: ["ignore", "pipe", "inherit", "ipc"],
   });
   const port = await new Promise<number>((resolve) => {
     app.stdout.on("data", (d: Buffer) => {
@@ -102,8 +103,12 @@ test("express-api", async () => {
     500,
   );
   assert.equal(await call(port, "POST", "/orders/ord_1/refund"), 502);
-  app.kill("SIGTERM");
-  assert.equal(await new Promise((r) => app.on("exit", r)), 0);
+  // Stopped as the system stops it: SIGTERM, or on Windows (no signals between programs) the
+  // process manager's message.
+  const exited = new Promise((r) => app.on("exit", r));
+  if (process.platform === "win32") app.send("shutdown");
+  else app.kill("SIGTERM");
+  assert.equal(await exited, 0);
   server.close();
 
   const all = events().map(summary).sort();

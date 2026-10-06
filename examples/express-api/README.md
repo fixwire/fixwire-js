@@ -24,4 +24,4 @@ curl -s -XPOST localhost:3000/orders/ord_1/refund                  # handled: a 
 | `tracesSampleRate` | A trace per request, named after its route (`GET /orders/:id`), with its status code |
 | `startSpan()` around the lookup | A `db.query` span inside the request's trace |
 | `fetch()` to `/inventory/reserve` | A child span, trace headers (only to `tracePropagationTargets`), and the inventory request continuing the same trace |
-| `Fixwire.close()` on SIGTERM | Queued events are sent before the process exits |
+| `Fixwire.close()` when stopped: SIGTERM, Ctrl-C, or a process manager's `shutdown` message on Windows | Queued events are sent before the process exits |
