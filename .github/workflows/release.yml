@@ -45,9 +45,10 @@ jobs:
       # each other at exactly this version.
       - name: pack
         run: for p in core browser node edge react; do (cd "packages/$p" && pnpm pack --pack-destination ../../release); done
-      # Each package after the ones it depends on.
+      # Each package after the ones it depends on. The ./ makes each a file:
+      # npm reads "release/x.tgz" as a GitHub repository (owner/name).
       - name: publish to npm
         if: vars.PUBLISH == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: for p in core browser node edge react; do npm publish "release/fixwire-$p-${GITHUB_REF_NAME#v}.tgz"; done
+        run: for p in core browser node edge react; do npm publish "./release/fixwire-$p-${GITHUB_REF_NAME#v}.tgz"; done
