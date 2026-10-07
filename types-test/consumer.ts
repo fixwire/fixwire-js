@@ -14,8 +14,10 @@ import {
   reactErrorHandler,
   withErrorBoundary,
 } from "@fixwire/react";
+import * as VueSdk from "@fixwire/vue";
 import * as otel from "@opentelemetry/api";
 import { type ComponentType, createElement, type ReactNode } from "react";
+import { createApp } from "vue";
 
 function beforeSend(event: Event, hint: EventHint): Event | null {
   if (hint.originalException instanceof TypeError) return null;
@@ -177,6 +179,25 @@ const ErrorPage = ({ error }: { error: Error & { digest?: string } }): ReactNode
 // @ts-expect-error misspelled option
 Next.init({ tracesSampelRate: 1 });
 
+// @fixwire/vue, with a real app. A real router is checked by the Vue
+// example's build (vue-router's own types don't pass this file's settings).
+const vueApp = createApp({ render: () => null });
+const route = { path: "/users/42", matched: [{ path: "/users/:id" }] };
+const vueRouter: VueSdk.RouterLike = {
+  afterEach: () => () => {},
+  onError: () => () => {},
+  currentRoute: { value: route },
+};
+VueSdk.init({ app: vueApp, router: vueRouter, tracesSampleRate: 0.2, attachProps: false });
+VueSdk.init({
+  app: [vueApp],
+  integrations: [VueSdk.browserTracingIntegration({ router: vueRouter })],
+});
+VueSdk.attachErrorHandler(vueApp, { logErrors: false });
+const vueRoute: string = VueSdk.routeName(route);
+// @ts-expect-error an app, not its root component
+VueSdk.attachErrorHandler({ render: () => null });
+
 const handler: Fixwire.ExpressErrorHandler = Fixwire.expressErrorHandler();
 Browser.init({ dsn: "https://fw_pk_live_key@ingest.example", offline: makeIndexedDbSpool });
 const browser: Browser.Client = Browser.init({
@@ -253,5 +274,6 @@ export {
   otlpTraces,
   sent,
   traceData,
+  vueRoute,
   workerResponse,
 };

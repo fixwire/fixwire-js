@@ -19,6 +19,9 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { type Json, thrown } from "../../../packages/core/test/helpers.ts";
+import type { Ingest } from "../../test/ingest.ts";
+
 const root = resolve(import.meta.dirname, "../../..");
 const scratch = (): string => {
   const base = process.env.FIXWIRE_EXAMPLES_TMP || tmpdir();
@@ -179,4 +182,46 @@ export async function serve(
 export async function chromium() {
   const { chromium } = await import("playwright");
   return chromium.launch();
+}
+
+/** The error events whose exception message includes `text`. */
+export const errors = (sink: Ingest, text: string): Json[] =>
+  sink.events().filter((e) => e.eventName === "exception" && thrown(e)?.message?.includes(text));
+
+/** Waits for the error event whose message includes `text`. */
+export async function reported(sink: Ingest, text: string): Promise<Json> {
+  const [event] = await sink.until(() => {
+    const got = errors(sink, text);
+    return got.length ? got : undefined;
+  });
+  return event as Json;
+}
+
+/**
+ * Checks a build's JavaScript files that fixwire-cli stamped: each has a
+ * debug id, and its map (named by its sourceMappingURL, or next to it) the
+ * same one. Returns how many there are.
+ */
+export function stampedFiles(dir: string): number {
+  const files: string[] = [];
+  const walk = (d: string): void => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      if (e.isDirectory()) walk(join(d, e.name));
+      else if (/\.m?js$/.test(e.name)) files.push(join(d, e.name));
+    }
+  };
+  walk(dir);
+  let stamped = 0;
+  for (const file of files) {
+    const code = readFileSync(file, "utf8");
+    const map =
+      /\/\/# sourceMappingURL=(\S+)\s*$/m.exec(code)?.[1] ?? `${file.split(/[\\/]/).at(-1)}.map`;
+    if (!existsSync(join(file, "..", map))) continue;
+    const id = /\/\/# debugId=([0-9a-f-]{36})/.exec(code)?.[1];
+    if (!id) throw new Error(`${file} has a source map but no debug id`);
+    const mapped = JSON.parse(readFileSync(join(file, "..", map), "utf8")).debug_id;
+    if (mapped !== id) throw new Error(`${file}: debug id ${id}, its map's ${mapped}`);
+    stamped++;
+  }
+  return stamped;
 }

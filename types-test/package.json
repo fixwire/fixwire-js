@@ -10,6 +10,7 @@
     "@fixwire/nextjs": "workspace:*",
     "@fixwire/node": "workspace:*",
     "@fixwire/react": "workspace:*",
+    "@fixwire/vue": "workspace:*",
     "@opentelemetry/api": "^1.9.1"
   }
 }

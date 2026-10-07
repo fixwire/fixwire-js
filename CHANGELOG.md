@@ -7,8 +7,9 @@ API.
 ## [Unreleased]
 
 - `@fixwire/nextjs`, new: Fixwire for Next.js 15.3 and newer from one import, which bundlers resolve to its Node.js, edge or browser build. `init()` in `instrumentation.ts` and `instrumentation-client.ts` reads `FIXWIRE_*` and `NEXT_PUBLIC_FIXWIRE_*` settings and traces page loads when tracing is on; `captureRequestError` reports server errors with the route pattern (on the edge runtime too, delivered before it returns); `onRouterTransitionStart` leaves navigation breadcrumbs; `useCaptureException` reports what `error.tsx` and `global-error.tsx` show, except server errors already reported; `withFixwireConfig` turns on browser source maps.
+- `@fixwire/vue`, new: `init({ app, router })` reports the errors Vue catches (renders, setup, watchers, hooks, event handlers) with the component, its parents and the hook, keeping the app's own `errorHandler`; vue-router's routes (4 or 5) name page loads, navigations and the errors after them, and the router's errors are reported. `attachErrorHandler(app)` and `browserTracingIntegration({ router })` do each part alone.
 - `@fixwire/core`: `setRouteName(route)` names the request's or page's segment and the errors after it after the route the framework matched.
-- An example app per framework, made with the framework's own scaffolding, built for production and driven in Chromium by its test: Next.js first.
+- An example app per framework, made with the framework's own scaffolding, built for production and driven in Chromium by its test: Next.js and Vue.
 
 ## [0.1.3] - 2026-10-08
 

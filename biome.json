@@ -6,7 +6,16 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!**/dist", "!packages/core/test/vectors.json"]
+    "includes": [
+      "**",
+      "!**/dist",
+      "!packages/core/test/vectors.json",
+      "!examples/frameworks/nextjs",
+      "!examples/frameworks/vue",
+      "!examples/frameworks/nuxt",
+      "!examples/frameworks/sveltekit",
+      "!examples/frameworks/angular"
+    ]
   },
   "formatter": {
     "enabled": true,

@@ -30,6 +30,13 @@ const paths = [
       "export { init, captureException, useCaptureException, onRouterTransitionStart } from '@fixwire/nextjs';",
     external: ["react"],
   },
+  {
+    name: "Vue",
+    pkg: "@fixwire/vue",
+    budget: 21 * 1024,
+    entry: "export { init, captureException, attachErrorHandler } from '@fixwire/vue';",
+    external: ["vue"],
+  },
 ];
 
 let failed = false;
