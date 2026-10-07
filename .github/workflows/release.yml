@@ -1,0 +1,51 @@
+name: Release
+
+# A v<version> tag publishes the five packages to npm, all at that version.
+# The tag comes with its GitHub release and the version's notes from
+# CHANGELOG.md. Publishing waits for the PUBLISH variable: set it once the
+# @fixwire organization exists on npm and each package names this
+# repository as its trusted publisher (the first publish of a package takes
+# an NPM_TOKEN secret instead, since npm trusts publishers only for packages
+# that exist).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write # npm's trusted publishing and provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: the tag is on main and is the packages' version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_REF_NAME is not on main"; exit 1; }
+          for manifest in packages/*/package.json; do
+            v=$(node -p "require('./$manifest').version")
+            [ "$v" = "$version" ] || { echo "::error::$manifest is $v, the tag says $version"; exit 1; }
+          done
+          grep -q "SDK_VERSION = \"$version\"" packages/core/src/dsn.ts || { echo "::error::SDK_VERSION is not $version"; exit 1; }
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build && pnpm pack-check
+      # pnpm writes the version over workspace:*, so the tarballs depend on
+      # each other at exactly this version.
+      - name: pack
+        run: for p in core browser node edge react; do (cd "packages/$p" && pnpm pack --pack-destination ../../release); done
+      # Each package after the ones it depends on.
+      - name: publish to npm
+        if: vars.PUBLISH == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: for p in core browser node edge react; do npm publish "release/fixwire-$p-${GITHUB_REF_NAME#v}.tgz"; done

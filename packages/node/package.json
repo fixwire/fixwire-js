@@ -2,6 +2,14 @@
   "name": "@fixwire/node",
   "version": "0.1.2",
   "description": "Fixwire SDK for Node.js",
+  "keywords": [
+    "fixwire",
+    "error-monitoring",
+    "error-tracking",
+    "tracing",
+    "observability",
+    "nodejs"
+  ],
   "license": "MIT",
   "homepage": "https://github.com/fixwire/fixwire-js/tree/main/packages/node#readme",
   "repository": {
@@ -32,5 +40,9 @@
   ],
   "dependencies": {
     "@fixwire/core": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

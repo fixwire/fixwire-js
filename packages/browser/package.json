@@ -2,6 +2,14 @@
   "name": "@fixwire/browser",
   "version": "0.1.2",
   "description": "Fixwire SDK for browsers",
+  "keywords": [
+    "fixwire",
+    "error-monitoring",
+    "error-tracking",
+    "tracing",
+    "observability",
+    "browser"
+  ],
   "license": "MIT",
   "homepage": "https://github.com/fixwire/fixwire-js/tree/main/packages/browser#readme",
   "repository": {
@@ -34,5 +42,9 @@
   ],
   "dependencies": {
     "@fixwire/core": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

@@ -2,6 +2,14 @@
   "name": "@fixwire/react",
   "version": "0.1.2",
   "description": "Fixwire SDK for React: error boundaries and root error handlers",
+  "keywords": [
+    "fixwire",
+    "error-monitoring",
+    "error-tracking",
+    "tracing",
+    "observability",
+    "react"
+  ],
   "license": "MIT",
   "homepage": "https://github.com/fixwire/fixwire-js/tree/main/packages/react#readme",
   "repository": {
@@ -32,5 +40,9 @@
   },
   "dependencies": {
     "@fixwire/browser": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }
