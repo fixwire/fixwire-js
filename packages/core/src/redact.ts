@@ -1,6 +1,6 @@
 /**
  * Client-side redaction: a port of the Fixwire server's scrubber
- * (pkg/redact in fixwire/fixwire) with identical output, proven by the shared corpus
+ * (pkg/redact in its core module) with identical output, proven by the shared corpus
  * pkg/redact/testdata/vectors.json.
  *
  * Patterns are ASCII-only like Go's RE2: no `u` flag (so `\b` and `\d`

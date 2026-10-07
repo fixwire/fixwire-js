@@ -1,5 +1,5 @@
 // The shared corpus of the Fixwire server's redaction (a copy of
-// pkg/redact/testdata/vectors.json in fixwire/fixwire, kept identical): the
+// pkg/redact/testdata/vectors.json in the server's core module, kept identical): the
 // server's scrubber and this port must agree on every case.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
