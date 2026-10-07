@@ -5,7 +5,7 @@
   "packageManager": "pnpm@11.0.9",
   "scripts": {
     "test": "node --conditions=fixwire-source --test \"packages/*/test/*.test.ts\" \"examples/test/*.test.ts\"",
-    "typecheck": "tsc -p packages/core && tsc -p packages/browser && tsc -p packages/node && tsc -p packages/edge && tsc -p packages/react && tsc -p packages/nextjs && tsc -p packages/vue",
+    "typecheck": "tsc -p packages/core && tsc -p packages/browser && tsc -p packages/node && tsc -p packages/edge && tsc -p packages/react && tsc -p packages/nextjs && tsc -p packages/vue && tsc -p packages/nuxt",
     "build": "node scripts/build.mjs",
     "pack-check": "node scripts/pack-check.mjs",
     "typecheck:consumer": "tsc -p types-test && tsc -p types-test/tsconfig.bundler.json",
@@ -18,6 +18,7 @@
     "@anthropic-ai/sdk": "^0.131.0",
     "@biomejs/biome": "2.5.11",
     "@happy-dom/global-registrator": "^20.14.5",
+    "@nuxt/schema": "^4.6.0",
     "@opentelemetry/api": "^1.9.1",
     "@types/node": "^24.0.0",
     "@types/react": "^19.3.0",

@@ -21,7 +21,7 @@ kept in Europe._
 Welcome to the official JavaScript SDK for **[Fixwire](https://fixwire.io)**.
 It captures errors and crashes, traces, release health, cron monitor
 check-ins, user feedback and AI agent runs from Node.js, browsers, edge
-runtimes, React, Next.js and Vue apps, written in JavaScript or TypeScript.
+runtimes, React, Next.js, Vue and Nuxt apps, written in JavaScript or TypeScript.
 
 | Package | For |
 |---|---|
@@ -31,6 +31,7 @@ runtimes, React, Next.js and Vue apps, written in JavaScript or TypeScript.
 | [`@fixwire/react`](https://github.com/fixwire/fixwire-js/tree/main/packages/react) | React 18+: error boundaries, and React 19's root error handlers |
 | [`@fixwire/nextjs`](https://github.com/fixwire/fixwire-js/tree/main/packages/nextjs) | Next.js 15.3+: server, edge and browser errors with route names, and source maps, from one import |
 | [`@fixwire/vue`](https://github.com/fixwire/fixwire-js/tree/main/packages/vue) | Vue 3.3+: the errors Vue catches with their component, and vue-router's routes as page names |
+| [`@fixwire/nuxt`](https://github.com/fixwire/fixwire-js/tree/main/packages/nuxt) | Nuxt 3.13+: a module for the browser and the server, with Vue's and Nitro's errors and route names |
 | [`@fixwire/core`](https://github.com/fixwire/fixwire-js/tree/main/packages/core) | What they share: the client, scopes, redaction, budgets and delivery (installed with them) |
 
 ## 📦 Getting started
@@ -42,8 +43,8 @@ runtimes, React, Next.js and Vue apps, written in JavaScript or TypeScript.
   and Windows, and runs the built package on Node.js 20.
 - Or a modern browser, an edge runtime (Cloudflare Workers, Vercel Edge,
   Deno Deploy, Netlify Edge Functions), React 18 or 19 for
-  `@fixwire/react`, Next.js 15.3 or newer for `@fixwire/nextjs`, and Vue
-  3.3 or newer for `@fixwire/vue`.
+  `@fixwire/react`, Next.js 15.3 or newer for `@fixwire/nextjs`, Vue 3.3 or
+  newer for `@fixwire/vue`, and Nuxt 3.13 or newer for `@fixwire/nuxt`.
 
 ### Installation
 
@@ -55,8 +56,8 @@ pnpm add @fixwire/node
 yarn add @fixwire/node
 ```
 
-For React, add `@fixwire/react` next to `@fixwire/browser`; for Next.js and
-Vue, `@fixwire/nextjs` or `@fixwire/vue` alone. Every package is fully typed, and each depends only
+For React, add `@fixwire/react` next to `@fixwire/browser`; for Next.js, Vue
+and Nuxt, `@fixwire/nextjs`, `@fixwire/vue` or `@fixwire/nuxt` alone. Every package is fully typed, and each depends only
 on other `@fixwire` packages.
 
 ### Basic configuration
@@ -143,6 +144,7 @@ seconds at most).
 | Browser tracing | Page loads and route changes as traces with web vitals, `fetch` calls as child spans with trace headers, a server-rendered page's trace continued | `integrations: [Fixwire.browserTracingIntegration()]` |
 | React | Error boundaries with the component stack, and React 19's root error handlers | `@fixwire/react` ([details](https://github.com/fixwire/fixwire-js#react)) |
 | Vue | The errors Vue catches with their component; vue-router's routes name pages, navigations and errors | `@fixwire/vue` ([details](https://github.com/fixwire/fixwire-js/tree/main/packages/vue)) |
+| Nuxt | The browser and the server from one module: Vue's, server rendering's and Nitro's errors, routes as names, debug ids in the build | `modules: ["@fixwire/nuxt"]` ([details](https://github.com/fixwire/fixwire-js/tree/main/packages/nuxt)) |
 | Cloudflare Workers | Fetch handlers, cron triggers and queue consumers: a scope, a segment and error reporting each, sent through `ctx.waitUntil` | `Fixwire.withFixwire(options, handlers)` from `@fixwire/edge` |
 | Vercel Edge, Next.js middleware, Deno, Netlify Edge | A scope and a segment per request, errors reported, sent through `waitUntil` | `Fixwire.wrapRequestHandler(handler, { waitUntil })` from `@fixwire/edge` |
 | Offline delivery | Requests kept until the server has them: on disk in Node.js, in IndexedDB in browsers | `offline: true` (Node.js); `offline: makeIndexedDbSpool` from `@fixwire/browser/offline` |

@@ -21,3 +21,4 @@ against a fake ingest and drive it in Chromium.
 |---|---|---|
 | [nextjs](frameworks/nextjs) | `create-next-app` (Next.js 16, App Router) | Server render and route handler errors named after their routes, browser errors with debug ids and navigation breadcrumbs, an error page that doesn't report server errors twice, page-load and request traces |
 | [vue](frameworks/vue) | `create-vue` (Vue 3, vue-router 5, Vite) | Errors from click handlers, renders, a page's setup and a router guard, with their component and route; page loads and navigations named after routes; hidden source maps with debug ids; the app's type check against the packages |
+| [nuxt](frameworks/nuxt) | `create-nuxt` (Nuxt 4, minimal template) | Server render and API errors named after their routes and reported once, browser errors with their component and debug ids stamped by the module, client and server config files, no report for a 404, the app's type check |

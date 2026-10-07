@@ -20,18 +20,12 @@ import {
 import type { App } from "vue";
 
 import { attachErrorHandler, type ErrorHandlerOptions } from "./errorhandler.ts";
-import { browserTracingIntegration, instrumentRouter, type RouterLike } from "./router.ts";
+import { instrumentRouter, type RouterLike } from "./router.ts";
+import { browserTracingIntegration } from "./tracing.ts";
 
 export * from "@fixwire/browser";
-export { attachErrorHandler, componentName, type ErrorHandlerOptions } from "./errorhandler.ts";
-export {
-  browserTracingIntegration,
-  instrumentRouter,
-  type RouteLike,
-  type RouterLike,
-  routeName,
-  type VueTracingOptions,
-} from "./router.ts";
+export * from "./shared.ts";
+export { browserTracingIntegration, type VueTracingOptions } from "./tracing.ts";
 
 /** Options of init: the browser SDK's, and what Vue adds. */
 export interface VueOptions extends BrowserOptions, ErrorHandlerOptions {

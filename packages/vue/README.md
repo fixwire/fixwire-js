@@ -129,6 +129,11 @@ and:
 | `logErrors` | `true` | Log errors to the console as Vue does, when the app has no `errorHandler` of its own |
 | `attachProps` | `false` | Send the component's props with its errors |
 
+For hosts that hand Vue's errors over another way, `captureVueError(error,
+vm, info)` reports one with the same context. `@fixwire/vue/shared` has
+the parts that don't need the browser SDK (reporting Vue's errors, naming
+routes), for server rendering.
+
 ## 🧪 Examples
 
 - [vue](https://github.com/fixwire/fixwire-js/tree/main/examples/frameworks/vue): an app made with `create-vue` (Vue 3, vue-router 5, Vite), whose pages, buttons and router guard fail on purpose; its test builds it for production and checks what Fixwire receives in Chromium.

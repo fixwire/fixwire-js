@@ -1,6 +1,6 @@
 // Vue's errorHandler: the errors Vue catches (rendering, watchers, lifecycle
 // hooks, event handlers) never reach the browser's global handlers.
-import { captureException, withScope } from "@fixwire/browser";
+import { captureException, withScope } from "@fixwire/core";
 import type { App, ComponentPublicInstance } from "vue";
 
 /** Options of attachErrorHandler. */
@@ -42,9 +42,34 @@ function componentTrace(vm: ComponentPublicInstance | null): string[] {
 }
 
 /**
- * Reports the errors Vue catches in `app`, with the component, its parents
- * and where in it (a lifecycle hook, a render, an event handler) as the
- * `vue` context. An errorHandler the app set before keeps running after.
+ * Reports an error Vue caught, with the component, its parents and where in
+ * it (a lifecycle hook, a render, an event handler) as the `vue` context.
+ * For hosts that hand Vue's errors over another way, such as Nuxt's
+ * `vue:error` hook. Returns the event's id.
+ */
+export function captureVueError(
+  error: unknown,
+  vm: ComponentPublicInstance | null | undefined,
+  info: string | undefined,
+  options: { attachProps?: boolean; mechanism?: string } = {},
+): string | undefined {
+  return withScope((scope) => {
+    const props = options.attachProps && vm?.$props ? { propsData: { ...vm.$props } } : {};
+    scope.setContext("vue", {
+      componentName: componentName(vm),
+      componentTrace: componentTrace(vm ?? null),
+      lifecycleHook: info,
+      ...props,
+    });
+    return captureException(error, {
+      mechanism: { type: options.mechanism ?? "vue", handled: false },
+    });
+  });
+}
+
+/**
+ * Reports the errors Vue catches in `app` (see captureVueError). An
+ * errorHandler the app set before keeps running after.
  *
  * @example
  * const app = createApp(App);
@@ -54,16 +79,7 @@ export function attachErrorHandler(app: App, options: ErrorHandlerOptions = {}):
   const previous = app.config.errorHandler;
   if ((previous as { fixwire?: boolean } | undefined)?.fixwire) return;
   const handler = (error: unknown, vm: ComponentPublicInstance | null, info: string): void => {
-    withScope((scope) => {
-      const props = options.attachProps && vm?.$props ? { propsData: { ...vm.$props } } : {};
-      scope.setContext("vue", {
-        componentName: componentName(vm),
-        componentTrace: componentTrace(vm),
-        lifecycleHook: info,
-        ...props,
-      });
-      captureException(error, { mechanism: { type: "vue", handled: false } });
-    });
+    captureVueError(error, vm, info, options);
     if (previous) previous(error, vm, info);
     else if (options.logErrors !== false) console.error(error);
   };

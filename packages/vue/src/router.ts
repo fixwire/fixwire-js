@@ -1,12 +1,6 @@
 // vue-router: pages and navigations named after the route they matched
 // (`/users/:id`), and the router's own errors reported.
-import {
-  type BrowserTracingOptions,
-  browserTracingIntegration as browserTracing,
-  captureException,
-  type Integration,
-  setRouteName,
-} from "@fixwire/browser";
+import { captureException, setRouteName } from "@fixwire/core";
 
 /** A route, as vue-router (4 or 5) and Nuxt's router give it. */
 export interface RouteLike {
@@ -19,12 +13,6 @@ export interface RouterLike {
   afterEach(guard: (to: RouteLike, from: RouteLike, failure?: unknown) => unknown): () => void;
   onError(handler: (error: unknown) => unknown): () => void;
   readonly currentRoute?: { readonly value: RouteLike };
-}
-
-/** Options of browserTracingIntegration. */
-export interface VueTracingOptions extends BrowserTracingOptions {
-  /** The app's router: pages and navigations are named after its routes. */
-  router?: RouterLike;
 }
 
 /**
@@ -71,21 +59,3 @@ export function instrumentRouter(router: RouterLike): void {
   const current = router.currentRoute?.value;
   if (current?.matched.length) setRouteName(routeName(current));
 }
-
-/**
- * Page loads and navigations as traces (see `@fixwire/browser`), named
- * after the router's routes when it's given.
- *
- * @example
- * Fixwire.init({ dsn, tracesSampleRate: 0.2, integrations: [Fixwire.browserTracingIntegration({ router })] });
- */
-export const browserTracingIntegration = (options: VueTracingOptions = {}): Integration => {
-  const base = browserTracing(options);
-  return {
-    name: base.name,
-    setup: (client) => {
-      base.setup(client);
-      if (options.router) instrumentRouter(options.router);
-    },
-  };
-};
