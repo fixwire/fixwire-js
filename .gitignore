@@ -2,6 +2,16 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# What the framework example apps build and cache
+.next/
+.nuxt/
+.output/
+.svelte-kit/
+.angular/
+build/
+test-results/
+next-env.d.ts
+
 # Copied from the root by scripts/build.mjs
 packages/*/LICENSE
 packages/*/NOTICE

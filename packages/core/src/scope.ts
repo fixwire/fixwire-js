@@ -21,6 +21,8 @@ export class Scope {
   user: User | undefined;
   level: SeverityLevel | undefined;
   fingerprint: string[] | undefined;
+  /** The route being served ("/users/:id"), as setRouteName() set it. */
+  transactionName: string | undefined;
   private crumbs: Breadcrumb[] = [];
   processors: EventProcessor[] = [];
   maxBreadcrumbs = 100;
@@ -40,6 +42,7 @@ export class Scope {
     s.user = this.user ? { ...this.user } : undefined;
     s.level = this.level;
     s.fingerprint = this.fingerprint ? [...this.fingerprint] : undefined;
+    s.transactionName = this.transactionName;
     s.crumbs = this.breadcrumbs;
     s.processors = [...this.processors];
     s.maxBreadcrumbs = this.maxBreadcrumbs;
@@ -229,6 +232,7 @@ export function applyScopes(event: Event, maxBreadcrumbs: number): EventProcesso
   const user: User = {};
   let level: SeverityLevel | undefined;
   let fingerprint: string[] | undefined;
+  let transaction: string | undefined;
   const crumbs: Breadcrumb[] = [];
   const processors: EventProcessor[] = [];
   for (const s of layers) {
@@ -238,6 +242,7 @@ export function applyScopes(event: Event, maxBreadcrumbs: number): EventProcesso
     if (s.user) Object.assign(user, s.user);
     level = s.level ?? level;
     fingerprint = s.fingerprint ?? fingerprint;
+    transaction = s.transactionName ?? transaction;
     crumbs.push(...s.breadcrumbs);
     processors.push(...s.processors);
   }
@@ -248,6 +253,7 @@ export function applyScopes(event: Event, maxBreadcrumbs: number): EventProcesso
   // A level set on a scope wins over the event's default.
   if (level) event.level = level;
   if (fingerprint && !event.fingerprint) event.fingerprint = fingerprint;
+  if (transaction && !event.transaction) event.transaction = transaction;
   if (crumbs.length) {
     crumbs.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
     event.breadcrumbs = [...crumbs.slice(-maxBreadcrumbs), ...(event.breadcrumbs ?? [])];

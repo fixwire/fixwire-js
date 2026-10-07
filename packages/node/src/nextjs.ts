@@ -12,7 +12,7 @@
  * The Node.js runtime only; the browser side uses @fixwire/browser (in
  * `instrumentation-client.ts`) and @fixwire/react.
  */
-import { getClient, withScope } from "@fixwire/core";
+import { getClient, setRouteName, withScope } from "@fixwire/core";
 
 import { safeHeaders } from "./integrations.ts";
 
@@ -29,7 +29,7 @@ export interface NextErrorContext {
   routerKind: string;
   /** The route pattern, e.g. `/blog/[slug]`. */
   routePath: string;
-  /** "render", "route", "action" or "middleware". */
+  /** "render", "route", "action", or "proxy" ("middleware" before Next 16). */
   routeType: string;
   renderSource?: string;
   revalidateReason?: string;
@@ -51,6 +51,8 @@ export async function captureRequestError(
   if (!client) return;
   const [path, query] = request.path.split("?", 2) as [string, string | undefined];
   const digest = (error as { digest?: unknown } | null)?.digest;
+  // The request's segment is named after the route too.
+  setRouteName(context.routePath);
   withScope((scope) => {
     scope.setContext("nextjs", {
       ...context,

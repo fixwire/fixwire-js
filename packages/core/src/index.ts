@@ -73,6 +73,7 @@ export {
   type SpanJSON,
   type SpanStatus,
   type StartSpanOptions,
+  setRouteName,
   shouldPropagate,
   startInactiveSpan,
   startSpan,

@@ -3,48 +3,16 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { readdirSync } from "node:fs";
-import { createServer, request, type Server } from "node:http";
+import { request } from "node:http";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { gunzipSync } from "node:zlib";
 
-import type { TransportRequest } from "../../packages/core/src/client.ts";
-import { type Json, recordsOf, spansOf, thrown } from "../../packages/core/test/helpers.ts";
+import { type Json, thrown } from "../../packages/core/test/helpers.ts";
+import { ingest } from "./ingest.ts";
 
 const here = fileURLToPath(new URL("..", import.meta.url));
-
-/** A fake ingest: errors and messages are OTLP log records, spans OTLP spans. */
-async function ingest(): Promise<{
-  server: Server;
-  dsn: string;
-  events: () => Json[];
-  spans: () => Json[];
-}> {
-  const got: TransportRequest[] = [];
-  const server = createServer((req, res) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (c) => chunks.push(c));
-    req.on("end", () => {
-      let body = Buffer.concat(chunks);
-      if (req.headers["content-encoding"] === "gzip") body = gunzipSync(body);
-      // Only what carries the key counts (a header, or the query of a closing page).
-      const url = `http://${req.headers.host}${req.url}`;
-      if (req.headers.authorization === "Bearer publickey" || url.includes("key=publickey"))
-        got.push({ url, headers: {}, body: String(body) });
-      res.writeHead(200, { "access-control-allow-origin": "*" }).end("{}");
-    });
-  });
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  const port = (server.address() as { port: number }).port;
-  return {
-    server,
-    dsn: `http://publickey@127.0.0.1:${port}`,
-    events: () => recordsOf(got),
-    spans: () => spansOf(got),
-  };
-}
 
 const op = (s: Json): string => s.attributes["fixwire.op"];
 /** No parent here: the span starts this process's part of its trace. */

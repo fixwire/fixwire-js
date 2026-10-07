@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { withIsolationScope } from "../src/scope.ts";
+import { getCurrentScope, withIsolationScope } from "../src/scope.ts";
 import {
   continueTrace,
   getActiveSpan,
@@ -10,6 +10,7 @@ import {
   MAX_SPANS_PER_SEGMENT,
   propagationFromHeaders,
   sample,
+  setRouteName,
   shouldPropagate,
   startInactiveSpan,
   startSpan,
@@ -282,6 +283,40 @@ test("errors carry the active span, else the continued trace", async () => {
   assert.equal(outside.attributes["fixwire.transaction"], undefined);
   assert.equal(inside.traceId, TRACE);
   assert.equal(inside.attributes["fixwire.transaction"], "job");
+});
+
+test("setRouteName names the request's segment and the errors after it", async () => {
+  const { client, sent } = fakeClient({ tracesSampleRate: 1 });
+  withIsolationScope(() => {
+    const request = startInactiveSpan({
+      name: "GET /users/42",
+      op: "http.server",
+      forceSegment: true,
+      attributes: { "http.request.method": "GET" },
+    });
+    getCurrentScope().span = request;
+    setRouteName("/users/:id");
+    client.captureMessage("in the route");
+    request.end();
+  });
+  withIsolationScope(() => {
+    startSpan({ name: "/orders/7", op: "navigation", forceSegment: true }, () => {
+      setRouteName("/orders/[id]");
+      client.captureMessage("on the page");
+    });
+    setRouteName("");
+  });
+  assert.ok(await client.flush(2000));
+  const records = recordsOf(sent);
+  const inRoute = records.find((r) => r.body === "in the route") as Json;
+  const onPage = records.find((r) => r.body === "on the page") as Json;
+  assert.equal(inRoute.attributes["fixwire.transaction"], "/users/:id");
+  assert.equal(onPage.attributes["fixwire.transaction"], "/orders/[id]");
+  const segments = spansOf(sent).filter((s) => !s.parentSpanId);
+  const request = segments.find((s) => s.attributes["http.route"] === "/users/:id") as Json;
+  const page = segments.find((s) => s.attributes["http.route"] === "/orders/[id]") as Json;
+  assert.equal(request.name, "GET /users/:id");
+  assert.equal(page.name, "/orders/[id]");
 });
 
 test("trace headers follow the active span and pass the caller's tracestate and baggage on", () => {

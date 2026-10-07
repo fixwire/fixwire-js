@@ -445,6 +445,28 @@ export function getActiveSpan(): Span | undefined {
   return getCurrentScope().span;
 }
 
+/**
+ * Names what is being served after its route, as the framework matched it
+ * ("/users/:id", "/users/[id]"): errors reported from here on carry it as
+ * their transaction, and the segment they belong to is named after it (a
+ * request's as "GET /users/:id", a page's as the route). Framework
+ * integrations call it; call it yourself from a router of your own.
+ *
+ * @example
+ * router.afterEach((to) => setRouteName(to.matched.at(-1)?.path ?? to.path));
+ */
+export function setRouteName(route: string): void {
+  if (!route) return;
+  getIsolationScope().transactionName = route;
+  const segment = getActiveSpan()?.segment;
+  if (!segment) return;
+  const method = segment.attributes["http.request.method"];
+  segment.updateName(
+    segment.op === "http.server" && typeof method === "string" ? `${method} ${route}` : route,
+  );
+  segment.setAttribute("http.route", route);
+}
+
 function createSpan(options: StartSpanOptions): Span {
   const parent = options.forceSegment ? undefined : getActiveSpan();
   if (parent) {

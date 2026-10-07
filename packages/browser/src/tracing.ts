@@ -70,6 +70,8 @@ function startPageSegment(
   startTime?: number,
 ): Span {
   page?.finish();
+  // A new page has no route yet: the app's router names it (setRouteName).
+  getIsolationScope().transactionName = undefined;
   const span = startInactiveSpan({
     name,
     op,
