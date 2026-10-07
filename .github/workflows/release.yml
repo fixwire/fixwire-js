@@ -37,6 +37,8 @@ jobs:
           node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
+      # npm's trusted publishing needs npm 11.5.1 or newer.
+      - run: npm install -g npm@^11.5.1
       - run: pnpm install --frozen-lockfile
       - run: pnpm build && pnpm pack-check
       # pnpm writes the version over workspace:*, so the tarballs depend on

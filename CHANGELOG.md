@@ -4,6 +4,10 @@ All notable changes to the Fixwire JavaScript SDKs are listed here. Versions fol
 Versioning](https://semver.org); before 1.0, a minor version may change the
 API.
 
+## [0.1.3] - 2026-10-08
+
+- The first release on npm: `@fixwire/core`, `@fixwire/browser`, `@fixwire/node`, `@fixwire/edge` and `@fixwire/react`, published from this repository's release workflow with provenance. Each package depends on the others at exactly its own version.
+
 ## [0.1.2] - 2026-10-07
 
 - `@fixwire/browser`: the gecko (Firefox, Safari) stack line parser is one scan, linear in the line, giving the frames its expression gave; a 1 KB line of parentheses took the expression most of a second, 100 KB now take milliseconds. Its eval expression tries each word once.
