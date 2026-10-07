@@ -5,7 +5,7 @@
   "packageManager": "pnpm@11.0.9",
   "scripts": {
     "test": "node --conditions=fixwire-source --test \"packages/*/test/*.test.ts\" \"examples/test/*.test.ts\"",
-    "typecheck": "tsc -p packages/core && tsc -p packages/browser && tsc -p packages/node && tsc -p packages/edge && tsc -p packages/react",
+    "typecheck": "tsc -p packages/core && tsc -p packages/browser && tsc -p packages/node && tsc -p packages/edge && tsc -p packages/react && tsc -p packages/nextjs",
     "build": "node scripts/build.mjs",
     "pack-check": "node scripts/pack-check.mjs",
     "typecheck:consumer": "tsc -p types-test && tsc -p types-test/tsconfig.bundler.json",
@@ -26,6 +26,7 @@
     "fake-indexeddb": "^6.2.5",
     "happy-dom": "^20.14.5",
     "openai": "^7.27.0",
+    "playwright": "^1.64.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "typescript": "^5.9.0"

@@ -9,8 +9,8 @@
  *   }
  *   export const onRequestError = Fixwire.captureRequestError;
  *
- * The Node.js runtime only; the browser side uses @fixwire/browser (in
- * `instrumentation-client.ts`) and @fixwire/react.
+ * The Node.js runtime only; @fixwire/nextjs covers the edge runtime and the
+ * browser too, from one import.
  */
 import { getClient, setRouteName, withScope } from "@fixwire/core";
 

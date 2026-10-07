@@ -20,3 +20,6 @@ packages/*/NOTICE
 .env
 .env.*
 !.env.example
+
+# The framework examples are installed without a lockfile of their own
+examples/frameworks/*/package-lock.json

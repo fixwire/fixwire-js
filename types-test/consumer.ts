@@ -4,6 +4,8 @@
 import * as Browser from "@fixwire/browser";
 import { makeIndexedDbSpool } from "@fixwire/browser/offline";
 import * as Edge from "@fixwire/edge";
+import * as Next from "@fixwire/nextjs";
+import * as NextClient from "@fixwire/nextjs/client";
 import type { Breadcrumb, Event, EventHint, Integration } from "@fixwire/node";
 import * as Fixwire from "@fixwire/node";
 import {
@@ -156,6 +158,25 @@ export const onRequestError: (
   context: Fixwire.NextErrorContext,
 ) => Promise<void> = Fixwire.captureRequestError;
 
+// @fixwire/nextjs: one import in every runtime.
+Next.init({ tracesSampleRate: 0.2, filterNoise: true, useEnvironment: true });
+export const onNextRequestError: (
+  error: unknown,
+  request: Next.NextRequestInfo,
+  context: Next.NextErrorContext,
+) => Promise<void> = Next.captureRequestError;
+export const onRouterTransitionStart: (url: string, navigationType: string) => void =
+  Next.onRouterTransitionStart;
+const nextConfig: { reactStrictMode: boolean } = Next.withFixwireConfig({ reactStrictMode: true });
+const nextConfigFn = Next.withFixwireConfig(async (phase: string) => ({ distDir: phase }));
+NextClient.init({ integrations: [Next.browserTracingIntegration()] });
+const ErrorPage = ({ error }: { error: Error & { digest?: string } }): ReactNode => {
+  Next.useCaptureException(error);
+  return null;
+};
+// @ts-expect-error misspelled option
+Next.init({ tracesSampelRate: 1 });
+
 const handler: Fixwire.ExpressErrorHandler = Fixwire.expressErrorHandler();
 Browser.init({ dsn: "https://fw_pk_live_key@ingest.example", offline: makeIndexedDbSpool });
 const browser: Browser.Client = Browser.init({
@@ -215,6 +236,7 @@ export {
   boundary,
   browser,
   checkInId,
+  ErrorPage,
   feedbackId,
   handler,
   headers,
@@ -224,6 +246,8 @@ export {
   meta,
   middlewareResponse,
   n,
+  nextConfig,
+  nextConfigFn,
   onUncaughtError,
   otelLinked,
   otlpTraces,

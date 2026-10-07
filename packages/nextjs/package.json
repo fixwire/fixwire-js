@@ -1,0 +1,78 @@
+{
+  "name": "@fixwire/nextjs",
+  "version": "0.1.3",
+  "description": "Fixwire SDK for Next.js: server, edge and browser errors, route names and source maps",
+  "keywords": [
+    "fixwire",
+    "error-monitoring",
+    "error-tracking",
+    "tracing",
+    "observability",
+    "nextjs",
+    "next"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/fixwire/fixwire-js/tree/main/packages/nextjs#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fixwire/fixwire-js.git",
+    "directory": "packages/nextjs"
+  },
+  "bugs": "https://github.com/fixwire/fixwire-js/issues",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/universal.d.ts",
+  "exports": {
+    ".": {
+      "fixwire-source": {
+        "types": "./src/universal.ts",
+        "browser": "./src/client.ts",
+        "edge-light": "./src/edge.ts",
+        "workerd": "./src/edge.ts",
+        "worker": "./src/edge.ts",
+        "default": "./src/index.ts"
+      },
+      "types": "./dist/universal.d.ts",
+      "browser": "./dist/client.js",
+      "edge-light": "./dist/edge.js",
+      "workerd": "./dist/edge.js",
+      "worker": "./dist/edge.js",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "fixwire-source": "./src/client.ts",
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./server": {
+      "fixwire-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./edge": {
+      "fixwire-source": "./src/edge.ts",
+      "types": "./dist/edge.d.ts",
+      "default": "./dist/edge.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "dependencies": {
+    "@fixwire/browser": "workspace:*",
+    "@fixwire/core": "workspace:*",
+    "@fixwire/edge": "workspace:*",
+    "@fixwire/node": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

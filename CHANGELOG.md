@@ -4,6 +4,12 @@ All notable changes to the Fixwire JavaScript SDKs are listed here. Versions fol
 Versioning](https://semver.org); before 1.0, a minor version may change the
 API.
 
+## [Unreleased]
+
+- `@fixwire/nextjs`, new: Fixwire for Next.js 15.3 and newer from one import, which bundlers resolve to its Node.js, edge or browser build. `init()` in `instrumentation.ts` and `instrumentation-client.ts` reads `FIXWIRE_*` and `NEXT_PUBLIC_FIXWIRE_*` settings and traces page loads when tracing is on; `captureRequestError` reports server errors with the route pattern (on the edge runtime too, delivered before it returns); `onRouterTransitionStart` leaves navigation breadcrumbs; `useCaptureException` reports what `error.tsx` and `global-error.tsx` show, except server errors already reported; `withFixwireConfig` turns on browser source maps.
+- `@fixwire/core`: `setRouteName(route)` names the request's or page's segment and the errors after it after the route the framework matched.
+- An example app per framework, made with the framework's own scaffolding, built for production and driven in Chromium by its test: Next.js first.
+
 ## [0.1.3] - 2026-10-08
 
 - The first release on npm: `@fixwire/core`, `@fixwire/browser`, `@fixwire/node`, `@fixwire/edge` and `@fixwire/react`, published from this repository's release workflow with provenance. Each package depends on the others at exactly its own version.

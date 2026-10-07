@@ -21,7 +21,7 @@ kept in Europe._
 Welcome to the official JavaScript SDK for **[Fixwire](https://fixwire.io)**.
 It captures errors and crashes, traces, release health, cron monitor
 check-ins, user feedback and AI agent runs from Node.js, browsers, edge
-runtimes and React apps, written in JavaScript or TypeScript.
+runtimes, React and Next.js apps, written in JavaScript or TypeScript.
 
 | Package | For |
 |---|---|
@@ -29,6 +29,7 @@ runtimes and React apps, written in JavaScript or TypeScript.
 | [`@fixwire/browser`](https://github.com/fixwire/fixwire-js/tree/main/packages/browser) | Web apps, within a size budget |
 | [`@fixwire/edge`](https://github.com/fixwire/fixwire-js/tree/main/packages/edge) | Cloudflare Workers, Vercel Edge Functions and Next.js middleware, Deno Deploy, Netlify Edge Functions |
 | [`@fixwire/react`](https://github.com/fixwire/fixwire-js/tree/main/packages/react) | React 18+: error boundaries, and React 19's root error handlers |
+| [`@fixwire/nextjs`](https://github.com/fixwire/fixwire-js/tree/main/packages/nextjs) | Next.js 15.3+: server, edge and browser errors with route names, and source maps, from one import |
 | [`@fixwire/core`](https://github.com/fixwire/fixwire-js/tree/main/packages/core) | What they share: the client, scopes, redaction, budgets and delivery (installed with them) |
 
 ## 📦 Getting started
@@ -39,8 +40,8 @@ runtimes and React apps, written in JavaScript or TypeScript.
 - Node.js 20 or newer. CI tests Node.js 22 and 24 on Linux and 24 on macOS
   and Windows, and runs the built package on Node.js 20.
 - Or a modern browser, an edge runtime (Cloudflare Workers, Vercel Edge,
-  Deno Deploy, Netlify Edge Functions), and React 18 or 19 for
-  `@fixwire/react`.
+  Deno Deploy, Netlify Edge Functions), React 18 or 19 for
+  `@fixwire/react`, and Next.js 15.3 or newer for `@fixwire/nextjs`.
 
 ### Installation
 
@@ -52,8 +53,9 @@ pnpm add @fixwire/node
 yarn add @fixwire/node
 ```
 
-For React, add `@fixwire/react` next to `@fixwire/browser`. Every package is
-fully typed, and each depends only on `@fixwire/core`.
+For React, add `@fixwire/react` next to `@fixwire/browser`; for Next.js,
+`@fixwire/nextjs` alone. Every package is fully typed, and each depends only
+on other `@fixwire` packages.
 
 ### Basic configuration
 
@@ -132,7 +134,7 @@ seconds at most).
 | HTTP servers (Node.js) | A scope per request, the caller's trace continued, a segment per request named after its route, request sessions; Express and any server on `node:http` | On by default in `@fixwire/node` |
 | Express | 5xx errors (sync and async) with the request and the route; 4xx are not reported | `Fixwire.setupExpressErrorHandler(app)` after your routes |
 | Outgoing HTTP (Node.js) | `http`, `https` and `fetch` calls become child spans with an `http` breadcrumb, and carry trace headers to your targets | On by default in `@fixwire/node` |
-| Next.js | Server errors with the route pattern and the request | `export const onRequestError = Fixwire.captureRequestError` ([details](https://github.com/fixwire/fixwire-js#nextjs)) |
+| Next.js | Server, edge and browser errors with the route pattern, error pages, navigations, source maps | `@fixwire/nextjs` ([details](https://github.com/fixwire/fixwire-js#nextjs)) |
 | Serverless functions | AWS Lambda, Google Cloud Functions, Azure Functions, Netlify and Vercel functions: a scope and a segment per call, errors reported, flushed before it returns | `Fixwire.wrapHandler(handler)` |
 | Browser global handlers | Uncaught errors and unhandled rejections, through listeners (never `window.onerror`) | On by default in `@fixwire/browser` |
 | Browser breadcrumbs | Console calls and `fetch` requests as breadcrumbs | On by default in `@fixwire/browser` |
@@ -177,21 +179,32 @@ For a server-rendered page, put `Fixwire.getTraceMetaTags()` in its
 
 ### Next.js
 
-```js
-// instrumentation.ts
-import * as Fixwire from "@fixwire/node";
+```ts
+// instrumentation.ts: the server, on the Node.js and edge runtimes
+import * as Fixwire from "@fixwire/nextjs";
 
 export function register() {
-  if (process.env.NEXT_RUNTIME === "nodejs") Fixwire.init({ dsn: process.env.FIXWIRE_DSN });
+  Fixwire.init({ tracesSampleRate: 0.2 }); // FIXWIRE_DSN or NEXT_PUBLIC_FIXWIRE_DSN
 }
-
 export const onRequestError = Fixwire.captureRequestError;
+
+// instrumentation-client.ts: the browser
+import * as Fixwire from "@fixwire/nextjs";
+
+Fixwire.init({ tracesSampleRate: 0.2 }); // NEXT_PUBLIC_FIXWIRE_DSN
+export const onRouterTransitionStart = Fixwire.onRouterTransitionStart;
 ```
 
-Server errors (Next.js 15 and newer) arrive with the route pattern
-(`/blog/[slug]`) and the request. In the browser, use `@fixwire/browser`
-(in `instrumentation-client.ts`) and `@fixwire/react`; for middleware and
-edge routes, `@fixwire/edge`.
+`@fixwire/nextjs` is one import for every runtime: server errors (server
+components, route handlers, server actions, the proxy) arrive with the
+route pattern (`/blog/[slug]`) and the request, browser errors with the
+navigations before them. `Fixwire.useCaptureException(error)` in
+`error.tsx` and `global-error.tsx` reports what an error page shows, unless
+the server already did, and `withFixwireConfig(nextConfig)` turns on the
+browser source maps for `fixwire-cli`. See its
+[README](https://github.com/fixwire/fixwire-js/tree/main/packages/nextjs).
+`captureRequestError` from `@fixwire/node` still works for the server
+alone.
 
 ### Serverless functions
 
