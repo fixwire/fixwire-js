@@ -176,12 +176,14 @@ test("captures waiting to be encoded are bounded", async () => {
 });
 
 test("budgets fold repeats into the next event's fixwire.suppressed", async () => {
-  const { client, sent } = fakeClient({ rateLimit: { perIssueBurst: 1, perIssuePerMinute: 6000 } });
+  // One event, then one each 200 ms: the first three take far less (a cold
+  // first capture took over 10 ms on Windows), and the fourth comes after.
+  const { client, sent } = fakeClient({ rateLimit: { perIssueBurst: 1, perIssuePerMinute: 300 } });
   const boom = () => new Error("boom");
   client.captureException(boom());
   client.captureException(boom());
   client.captureException(boom());
-  await new Promise((r) => setTimeout(r, 30));
+  await new Promise((r) => setTimeout(r, 300));
   client.captureException(boom());
   assert.ok(await client.flush(2000));
   const records = recordsOf(sent);

@@ -378,16 +378,24 @@ test("the gecko parser takes time linear in the line", () => {
   // The expression took most of a second on 1 KB of parentheses, and four
   // times as long on twice as many: these lines would take it for ever.
   const gecko = geckoStackLineParser[1];
-  // Milliseconds of CPU a parse takes (other tests run meanwhile), the best of
-  // a few rounds in which each line is parsed three times.
-  const cpu = (lines: string[]) => {
+  // Milliseconds a parse takes, the best of a few rounds in which each line is
+  // parsed three times. CPU time, as other tests run meanwhile; on Windows
+  // the CPU clock ticks in 15.6 ms (every line read 0.00), so the wall clock
+  // there, the best round being the one the other tests left alone.
+  const clock =
+    process.platform === "win32"
+      ? () => performance.now()
+      : () => {
+          const { user, system } = process.cpuUsage();
+          return (user + system) / 1000;
+        };
+  const time = (lines: string[]) => {
     const best = lines.map(() => Number.POSITIVE_INFINITY);
     for (let round = 0; round < 5; round++)
       lines.forEach((line, i) => {
-        const started = process.cpuUsage();
+        const started = clock();
         for (let k = 0; k < 3; k++) gecko(line);
-        const { user, system } = process.cpuUsage(started);
-        best[i] = Math.min(best[i] as number, (user + system) / 3000);
+        best[i] = Math.min(best[i] as number, (clock() - started) / 3);
       });
     return best;
   };
@@ -399,14 +407,13 @@ test("the gecko parser takes time linear in the line", () => {
     (n: number) => `@http://${"a".repeat(n)} > eval`,
   ];
   for (const shape of shapes) {
-    const ms = cpu([10_000, 50_000, 100_000].map(shape));
+    const ms = time([10_000, 50_000, 100_000].map(shape));
     const [ms10k = 0, ms50k = 0, ms100k = 0] = ms;
     const what = `${JSON.stringify(shape(8))}: ${ms.map((t) => t.toFixed(2)).join(", ")} ms`;
     assert.ok(ms10k < 50 && ms100k < 250, what);
-    // Twice the line, about twice the time. CPU clocks tick in milliseconds on
-    // some systems (a 50k line can read 0.00), so the slack is 10 ms: a
+    // Twice the line, about twice the time, give or take a millisecond: a
     // quadratic parse takes seconds here.
-    assert.ok(ms100k < 3 * ms50k + 10, what);
+    assert.ok(ms100k < 3 * ms50k + 1, what);
   }
 });
 
