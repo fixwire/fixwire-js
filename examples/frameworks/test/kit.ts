@@ -148,10 +148,15 @@ export async function serve(
   args: string[],
   options: { cwd: string; port: number; env?: Record<string, string>; timeoutMs?: number },
 ): Promise<Server> {
+  // A process group of its own (but on Windows), so stopping it stops the
+  // processes it starts too: a server left behind holds the output pipes,
+  // and the test never ends.
+  const group = process.platform !== "win32";
   const child: ChildProcess = spawn(command, args, {
     cwd: options.cwd,
     env: { ...process.env, ...options.env },
     stdio: ["ignore", "pipe", "pipe"],
+    detached: group,
   });
   let out = "";
   child.stdout?.on("data", (c) => {
@@ -167,13 +172,26 @@ export async function serve(
       done();
     }),
   );
+  const signal = (name: NodeJS.Signals): void => {
+    try {
+      if (group && child.pid) process.kill(-child.pid, name);
+      else child.kill(name);
+    } catch {
+      // already gone
+    }
+  };
   const url = `http://127.0.0.1:${options.port}`;
   const server: Server = {
     url,
     output: () => out,
     stop: async () => {
-      if (!exited) child.kill("SIGTERM");
+      if (!exited) signal("SIGTERM");
+      const late = setTimeout(() => signal("SIGKILL"), 5000);
       await gone;
+      clearTimeout(late);
+      if (group) signal("SIGKILL"); // what the server started, if it outlived it
+      child.stdout?.destroy();
+      child.stderr?.destroy();
     },
   };
   const deadline = Date.now() + (options.timeoutMs ?? 60_000);

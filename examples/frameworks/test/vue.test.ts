@@ -36,9 +36,10 @@ before(async () => {
   });
   await cli(dir, ["sourcemaps", "inject", "dist"]);
   const port = await freePort();
+  const vite = join(dir, "node_modules/vite/bin/vite.js");
   app = await serve(
-    "npx",
-    ["vite", "preview", "--port", String(port), "--host", "127.0.0.1", "--strictPort"],
+    process.execPath,
+    [vite, "preview", "--port", String(port), "--host", "127.0.0.1", "--strictPort"],
     { cwd: dir, port },
   );
   browser = await chromium();

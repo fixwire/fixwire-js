@@ -32,7 +32,8 @@ before(async () => {
   await run("npm", ["run", "build"], { cwd: dir, env });
   await cli(dir, ["sourcemaps", "inject", ".next/static"]);
   const port = await freePort();
-  app = await serve("npx", ["next", "start", "-p", String(port), "-H", "127.0.0.1"], {
+  const nextBin = join(dir, "node_modules/next/dist/bin/next");
+  app = await serve(process.execPath, [nextBin, "start", "-p", String(port), "-H", "127.0.0.1"], {
     cwd: dir,
     port,
     env: { ...env, FIXWIRE_DSN: sink.dsn },
