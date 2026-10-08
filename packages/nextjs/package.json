@@ -1,6 +1,6 @@
 {
   "name": "@fixwire/nextjs",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Fixwire SDK for Next.js: server, edge and browser errors, route names and source maps",
   "keywords": [
     "fixwire",

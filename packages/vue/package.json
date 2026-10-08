@@ -1,6 +1,6 @@
 {
   "name": "@fixwire/vue",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Fixwire SDK for Vue: the errors Vue catches, with their component, and vue-router's routes as page names",
   "keywords": [
     "fixwire",

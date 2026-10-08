@@ -192,7 +192,7 @@ test("a sampled segment is sent as one OTLP export on /v1/traces, redacted", asy
     "service.version": "api@1.0.0",
     "deployment.environment.name": "test",
     "telemetry.sdk.name": "fixwire.javascript.test",
-    "telemetry.sdk.version": "0.2.0",
+    "telemetry.sdk.version": "0.2.1",
     "telemetry.sdk.language": "nodejs",
   });
   assert.equal(seg.parentSpanId, undefined);

@@ -1,6 +1,6 @@
 {
   "name": "@fixwire/sveltekit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Fixwire SDK for SvelteKit: server and browser errors, route names, from one import",
   "keywords": [
     "fixwire",
