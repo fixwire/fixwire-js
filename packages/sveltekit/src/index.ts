@@ -35,6 +35,8 @@ export {
   type NavigationLike,
   trackNavigation,
 } from "./common.ts";
+// The Vite plugin, for vite.config (also at @fixwire/sveltekit/vite).
+export { type FixwireSvelteKitOptions, fixwireSvelteKit } from "./vite.ts";
 
 /**
  * Starts the SDK on the server. Unset, the DSN, release and environment
