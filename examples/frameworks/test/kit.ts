@@ -109,6 +109,15 @@ export async function install(name: string): Promise<string> {
   return dir;
 }
 
+/**
+ * Runs fixwire-cli in an app: the binary FIXWIRE_CLI names (one built from
+ * this repository's cli/, say), or the release npm installed with the app.
+ */
+export function cli(dir: string, args: string[]): Promise<string> {
+  const bin = process.env.FIXWIRE_CLI;
+  return bin ? run(bin, args, { cwd: dir }) : run("npx", ["fixwire-cli", ...args], { cwd: dir });
+}
+
 /** A free TCP port on the loopback interface. */
 export function freePort(): Promise<number> {
   return new Promise((done, fail) => {
@@ -219,7 +228,9 @@ export function stampedFiles(dir: string): number {
     if (!existsSync(join(file, "..", map))) continue;
     const id = /\/\/# debugId=([0-9a-f-]{36})/.exec(code)?.[1];
     if (!id) throw new Error(`${file} has a source map but no debug id`);
-    const mapped = JSON.parse(readFileSync(join(file, "..", map), "utf8")).debug_id;
+    // debug_id, or the standard's debugId alone (Rolldown keeps only that).
+    const parsed = JSON.parse(readFileSync(join(file, "..", map), "utf8"));
+    const mapped = parsed.debug_id ?? parsed.debugId;
     if (mapped !== id) throw new Error(`${file}: debug id ${id}, its map's ${mapped}`);
     stamped++;
   }

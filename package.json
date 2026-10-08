@@ -5,7 +5,7 @@
   "packageManager": "pnpm@11.0.9",
   "scripts": {
     "test": "node --conditions=fixwire-source --test \"packages/*/test/*.test.ts\" \"examples/test/*.test.ts\"",
-    "typecheck": "tsc -p packages/core && tsc -p packages/browser && tsc -p packages/node && tsc -p packages/edge && tsc -p packages/react && tsc -p packages/nextjs && tsc -p packages/vue && tsc -p packages/nuxt",
+    "typecheck": "tsc -p packages/core && tsc -p packages/browser && tsc -p packages/node && tsc -p packages/edge && tsc -p packages/react && tsc -p packages/nextjs && tsc -p packages/vue && tsc -p packages/nuxt && tsc -p packages/sveltekit",
     "build": "node scripts/build.mjs",
     "pack-check": "node scripts/pack-check.mjs",
     "typecheck:consumer": "tsc -p types-test && tsc -p types-test/tsconfig.bundler.json",

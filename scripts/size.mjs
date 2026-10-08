@@ -37,6 +37,13 @@ const paths = [
     entry: "export { init, captureException, attachErrorHandler } from '@fixwire/vue';",
     external: ["vue"],
   },
+  {
+    name: "SvelteKit browser",
+    pkg: "@fixwire/sveltekit",
+    budget: 21 * 1024,
+    entry:
+      "export { init, captureException, handleErrorWithFixwire, trackNavigation } from '@fixwire/sveltekit';",
+  },
 ];
 
 let failed = false;

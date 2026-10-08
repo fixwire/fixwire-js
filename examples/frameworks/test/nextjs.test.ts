@@ -9,6 +9,7 @@ import { type Json, thrown } from "../../../packages/core/test/helpers.ts";
 import { type Ingest, ingest } from "../../test/ingest.ts";
 import {
   chromium,
+  cli,
   errors,
   freePort,
   install,
@@ -29,7 +30,7 @@ before(async () => {
   dir = await install("nextjs");
   const env = { NEXT_TELEMETRY_DISABLED: "1", NEXT_PUBLIC_FIXWIRE_DSN: sink.dsn };
   await run("npm", ["run", "build"], { cwd: dir, env });
-  await run("npx", ["fixwire-cli", "sourcemaps", "inject", ".next/static"], { cwd: dir });
+  await cli(dir, ["sourcemaps", "inject", ".next/static"]);
   const port = await freePort();
   app = await serve("npx", ["next", "start", "-p", String(port), "-H", "127.0.0.1"], {
     cwd: dir,

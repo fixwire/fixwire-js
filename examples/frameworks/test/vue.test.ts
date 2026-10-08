@@ -10,6 +10,7 @@ import { type Json, thrown } from "../../../packages/core/test/helpers.ts";
 import { type Ingest, ingest } from "../../test/ingest.ts";
 import {
   chromium,
+  cli,
   errors,
   freePort,
   install,
@@ -33,7 +34,7 @@ before(async () => {
     cwd: dir,
     env: { VITE_FIXWIRE_DSN: sink.dsn, VITE_FIXWIRE_RELEASE: "shop@1.0.0" },
   });
-  await run("npx", ["fixwire-cli", "sourcemaps", "inject", "dist"], { cwd: dir });
+  await cli(dir, ["sourcemaps", "inject", "dist"]);
   const port = await freePort();
   app = await serve(
     "npx",

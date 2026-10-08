@@ -14,6 +14,8 @@ import {
   reactErrorHandler,
   withErrorBoundary,
 } from "@fixwire/react";
+import * as Kit from "@fixwire/sveltekit";
+import { fixwireSvelteKit } from "@fixwire/sveltekit/vite";
 import * as VueSdk from "@fixwire/vue";
 import * as otel from "@opentelemetry/api";
 import { type ComponentType, createElement, type ReactNode } from "react";
@@ -198,6 +200,41 @@ const vueRoute: string = VueSdk.routeName(route);
 // @ts-expect-error an app, not its root component
 VueSdk.attachErrorHandler({ render: () => null });
 
+// @fixwire/sveltekit, against SvelteKit 3's and 2's hook shapes.
+interface KitEvent {
+  route: { id: string | null };
+  url: URL;
+  request: Request;
+  params: Record<string, string>;
+}
+type KitHandle = (input: {
+  event: KitEvent;
+  resolve: (
+    event: KitEvent,
+    opts?: { transformPageChunk?: (input: { html: string; done: boolean }) => string | undefined },
+  ) => Promise<Response>;
+}) => Response | Promise<Response>;
+type Kit3HandleError = (
+  input: ({ kind: "unknown"; error: unknown } | { kind: "app"; error: { message: string } }) & {
+    event: KitEvent;
+  },
+) => { message?: string } | undefined;
+type Kit2HandleError = (input: {
+  error: unknown;
+  event: KitEvent;
+  status: number;
+  message: string;
+}) => { message: string } | undefined;
+const kitHandle: KitHandle = Kit.fixwireHandle();
+const kit3Error: Kit3HandleError = Kit.handleErrorWithFixwire();
+const kit2Error: Kit2HandleError = Kit.handleErrorWithFixwire(({ message }) => ({ message }));
+Kit.init({ dsn: "https://k@ingest.example", tracesSampleRate: 0.2 });
+Kit.trackNavigation({
+  type: "link",
+  to: { route: { id: "/users/[id]" }, url: new URL("http://x/") },
+});
+const kitVite = fixwireSvelteKit({ debugIds: true });
+
 const handler: Fixwire.ExpressErrorHandler = Fixwire.expressErrorHandler();
 Browser.init({ dsn: "https://fw_pk_live_key@ingest.example", offline: makeIndexedDbSpool });
 const browser: Browser.Client = Browser.init({
@@ -262,6 +299,10 @@ export {
   handler,
   headers,
   id,
+  kit2Error,
+  kit3Error,
+  kitHandle,
+  kitVite,
   lambdaResult,
   loaded,
   meta,

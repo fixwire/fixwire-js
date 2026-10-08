@@ -162,6 +162,18 @@ importers:
         specifier: '>=18'
         version: 19.3.0
 
+  packages/sveltekit:
+    dependencies:
+      '@fixwire/browser':
+        specifier: workspace:*
+        version: link:../browser
+      '@fixwire/core':
+        specifier: workspace:*
+        version: link:../core
+      '@fixwire/node':
+        specifier: workspace:*
+        version: link:../node
+
   packages/vue:
     dependencies:
       '@fixwire/browser':
@@ -194,6 +206,9 @@ importers:
       '@fixwire/react':
         specifier: workspace:*
         version: link:../packages/react
+      '@fixwire/sveltekit':
+        specifier: workspace:*
+        version: link:../packages/sveltekit
       '@fixwire/vue':
         specifier: workspace:*
         version: link:../packages/vue
