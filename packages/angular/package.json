@@ -1,6 +1,6 @@
 {
   "name": "@fixwire/angular",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Fixwire SDK for Angular: an ErrorHandler, HttpClient failures and the Router's routes as page names",
   "keywords": [
     "fixwire",

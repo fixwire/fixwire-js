@@ -20,7 +20,7 @@ test("a page session starts, counts errors, and ends crashed on an unhandled one
   client.endSession(); // already over: nothing more is sent
   await client.flush(2000);
   const [body] = bodies(sent, "sessions");
-  assert.deepEqual(body?.sdk, { name: "fixwire.javascript.test", version: "0.1.3" });
+  assert.deepEqual(body?.sdk, { name: "fixwire.javascript.test", version: "0.2.0" });
   assert.equal(body?.release, "web@1.4.0");
   assert.equal(body?.environment, "production");
   const updates = sessionsOf(sent);

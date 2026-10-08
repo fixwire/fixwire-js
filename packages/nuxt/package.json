@@ -1,6 +1,6 @@
 {
   "name": "@fixwire/nuxt",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Fixwire SDK for Nuxt: a module for the browser and the server, with Vue's and Nitro's errors and routes as names",
   "keywords": [
     "fixwire",
