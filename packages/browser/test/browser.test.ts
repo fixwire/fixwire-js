@@ -407,13 +407,14 @@ test("the gecko parser takes time linear in the line", () => {
     (n: number) => `@http://${"a".repeat(n)} > eval`,
   ];
   for (const shape of shapes) {
-    const ms = time([10_000, 50_000, 100_000].map(shape));
-    const [ms10k = 0, ms50k = 0, ms100k = 0] = ms;
+    const ms = time([10_000, 100_000].map(shape));
+    const [ms10k = 0, ms100k = 0] = ms;
     const what = `${JSON.stringify(shape(8))}: ${ms.map((t) => t.toFixed(2)).join(", ")} ms`;
     assert.ok(ms10k < 50 && ms100k < 250, what);
-    // Twice the line, about twice the time, give or take a millisecond: a
-    // quadratic parse takes seconds here.
-    assert.ok(ms100k < 3 * ms50k + 1, what);
+    // Ten times the line, about ten times the time: a quadratic parse takes a
+    // hundred times as long. The bound leaves room for a busy machine (CI ran
+    // 10 KB in 0.72 ms and 100 KB in 11.88 ms with the other test files beside it).
+    assert.ok(ms100k < 25 * ms10k + 2, what);
   }
 });
 
