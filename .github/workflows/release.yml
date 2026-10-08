@@ -1,6 +1,6 @@
 name: Release
 
-# A v<version> tag publishes the five packages to npm, all at that version.
+# A v<version> tag publishes the packages to npm, all at that version.
 # The tag comes with its GitHub release and the version's notes from
 # CHANGELOG.md. Publishing waits for the PUBLISH variable: set it once the
 # @fixwire organization exists on npm and each package names this
@@ -14,6 +14,11 @@ on:
 permissions:
   contents: read
   id-token: write # npm's trusted publishing and provenance
+
+# Each package after the ones it depends on (scripts/build.mjs builds them
+# in the same order).
+env:
+  PACKAGES: core browser node edge react vue nextjs nuxt sveltekit angular
 
 jobs:
   publish:
@@ -44,11 +49,11 @@ jobs:
       # pnpm writes the version over workspace:*, so the tarballs depend on
       # each other at exactly this version.
       - name: pack
-        run: for p in core browser node edge react; do (cd "packages/$p" && pnpm pack --pack-destination ../../release); done
-      # Each package after the ones it depends on. The ./ makes each a file:
-      # npm reads "release/x.tgz" as a GitHub repository (owner/name).
+        run: for p in $PACKAGES; do (cd "packages/$p" && pnpm pack --pack-destination ../../release); done
+      # In order. The ./ makes each a file: npm reads "release/x.tgz" as a
+      # GitHub repository (owner/name).
       - name: publish to npm
         if: vars.PUBLISH == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: for p in core browser node edge react; do npm publish "./release/fixwire-$p-${GITHUB_REF_NAME#v}.tgz"; done
+        run: for p in $PACKAGES; do npm publish "./release/fixwire-$p-${GITHUB_REF_NAME#v}.tgz"; done

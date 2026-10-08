@@ -84,3 +84,24 @@ jobs:
       - run: pnpm typecheck:consumer
       - run: pnpm size
       - run: pnpm run license-gate
+
+  frameworks:
+    name: ${{ matrix.app }} example (production build in Chromium)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [nextjs, vue, nuxt, sveltekit, angular]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps --only-shell chromium
+      # The app is installed with the packed packages and fixwire-cli's newest release.
+      - name: test (install, build, run, drive in Chromium)
+        run: node --test --test-timeout=900000 examples/frameworks/test/${{ matrix.app }}.test.ts

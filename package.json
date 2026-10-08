@@ -5,6 +5,7 @@
   "packageManager": "pnpm@11.0.9",
   "scripts": {
     "test": "node --conditions=fixwire-source --test \"packages/*/test/*.test.ts\" \"examples/test/*.test.ts\"",
+    "test:frameworks": "node --test --test-timeout=900000 examples/frameworks/test/*.test.ts",
     "typecheck": "tsc -p packages/core && tsc -p packages/browser && tsc -p packages/node && tsc -p packages/edge && tsc -p packages/react && tsc -p packages/nextjs && tsc -p packages/vue && tsc -p packages/nuxt && tsc -p packages/sveltekit && tsc -p packages/angular",
     "build": "node scripts/build.mjs",
     "pack-check": "node scripts/pack-check.mjs",
