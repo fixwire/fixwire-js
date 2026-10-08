@@ -42,6 +42,7 @@ export {
 export { DEFAULT_DETECTORS, FILTERED, Redactor } from "./redact.ts";
 export {
   type AsyncContextStrategy,
+  type EventProcessor,
   getGlobalScope,
   getIsolationScope,
   Scope,

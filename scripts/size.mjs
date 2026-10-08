@@ -44,6 +44,13 @@ const paths = [
     entry:
       "export { init, captureException, handleErrorWithFixwire, trackNavigation } from '@fixwire/sveltekit';",
   },
+  {
+    name: "Angular",
+    pkg: "@fixwire/angular",
+    budget: 21 * 1024,
+    entry: "export { init, captureException, provideFixwire } from '@fixwire/angular';",
+    external: ["@angular/core", "@angular/router"],
+  },
 ];
 
 let failed = false;

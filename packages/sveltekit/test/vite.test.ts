@@ -23,11 +23,23 @@ test("stampBundle: chunks with maps get the snippet on a line of their own, thei
       map: { mappings: "AAAA" },
     },
     "nomap.js": { type: "chunk", fileName: "nomap.js", code: "x()", map: null },
+    "bundled.js": {
+      type: "chunk",
+      fileName: "bundled.js",
+      code: "y()\n//# debugId=1998f4e9-a4f6-5bcd-8f5d-4fd90f62faf8",
+      map: { mappings: "AAAA" },
+    },
     "style.css": { type: "asset", fileName: "style.css", source: "a{}" },
   } as const;
   const b = structuredClone(bundle) as unknown as Parameters<typeof stampBundle>[0];
   (b["app.js"] as { map: unknown }).map = sourceMap;
-  assert.equal(stampBundle(b), 2);
+  assert.equal(stampBundle(b), 3);
+  const bundled = (b["bundled.js"] as { code: string }).code;
+  assert.ok(
+    bundled.startsWith(";(function(){") &&
+      bundled.includes('"1998f4e9-a4f6-5bcd-8f5d-4fd90f62faf8"'),
+  );
+  assert.equal(bundled.split("//# debugId=").length, 2, "one comment, the bundler's");
   const id = debugIdFor('import"./b.js";go()');
   const app = b["app.js"] as { code: string };
   const [first, second, third] = app.code.split("\n");

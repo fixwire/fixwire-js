@@ -103,6 +103,9 @@ test("debug ids: stamped during the build, the maps' lines moved down by one, on
   file("strict.js", '"use strict";a()');
   file("strict.js.map", map("AAAA"));
   file("nomap.js", "a()");
+  // A bundler wrote this one's debug id: it keeps it, and gets the snippet.
+  file("bundled.js", "b()\n//# debugId=1998F4E9-A4F6-5BCD-8F5D-4FD90F62FAF8\n");
+  file("bundled.js.map", map("AAAA"));
   file("out.js", "a()\n//# sourceMappingURL=../../outside.map\n");
   writeFileSync(join(dir, "..", "outside.map"), map("AAAA"));
   try {
@@ -111,7 +114,10 @@ test("debug ids: stamped during the build, the maps' lines moved down by one, on
     // no symbolic links here
   }
 
-  assert.equal(stampDebugIds(dir), 2);
+  assert.equal(stampDebugIds(dir), 3);
+  const bundled = readFileSync(join(dir, "_nuxt", "bundled.js"), "utf8");
+  assert.ok(bundled.includes('g._fixwireDebugIds[s]="1998f4e9-a4f6-5bcd-8f5d-4fd90f62faf8"'));
+  assert.equal(bundled.split("//# debugId=").length, 2, "one comment, the bundler's");
   const read = (name: string) => readFileSync(join(dir, "_nuxt", name), "utf8");
   const id = debugIdFor('import{x}from"./b.js";x()');
   assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);

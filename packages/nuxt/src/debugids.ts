@@ -11,7 +11,7 @@ const snippet = (id: string): string =>
   `typeof self!=="undefined"?self:{};var s=new g.Error().stack;if(s){g._fixwireDebugIds=g._fixwireDebugIds||{};` +
   `g._fixwireDebugIds[s]="${id}"}}catch(e){}})();`;
 
-const DEBUG_ID = /^\/\/# debugId=[0-9a-fA-F-]{36}\s*$/m;
+const DEBUG_ID = /^\/\/# debugId=([0-9a-fA-F-]{36})\s*$/m;
 const MAP_URL = /^\/\/[#@] sourceMappingURL=(\S+)\s*$/m;
 
 /** A UUID (version 4 layout) from the file's content, as fixwire-cli derives it. */
@@ -27,7 +27,8 @@ export function debugIdFor(content: string): string {
  * Stamps each JavaScript file under `dir` that has a source map: the
  * snippet on a line of its own before the code (so the map's lines move down
  * by one and nothing else changes), a `//# debugId=` comment, and the id in
- * the map. Files stamped before, with a directive prologue or a hashbang
+ * the map; a file whose bundler wrote its debug id keeps it and gets the
+ * snippet. Files stamped before, with a directive prologue or a hashbang
  * (which must stay first), or whose map is outside `dir` are left alone.
  * Returns how many it stamped.
  */
@@ -40,7 +41,11 @@ export function stampDebugIds(dir: string): number {
     const parent = name.parentPath ?? (name as { path?: string }).path ?? root;
     const file = join(parent, name.name);
     const code = readFileSync(file, "utf8");
-    if (DEBUG_ID.test(code) || /^\s*(#!|["'])/.test(code)) continue;
+    if (/^\s*(#!|["'])/.test(code)) continue;
+    // A bundler may have written the debug id: then only the snippet is missing.
+    const bundled = DEBUG_ID.exec(code)?.[1]?.toLowerCase();
+    const id = bundled ?? debugIdFor(code);
+    if (code.includes(`g._fixwireDebugIds[s]="${id}"`)) continue;
     const ref = MAP_URL.exec(code)?.[1];
     if (ref?.startsWith("data:")) continue;
     const map = resolve(dirname(file), ref ? decodeURIComponent(ref) : `${name.name}.map`);
@@ -52,9 +57,8 @@ export function stampDebugIds(dir: string): number {
       continue;
     }
     if (typeof parsed.mappings !== "string") continue;
-    const id = debugIdFor(code);
     const end = code.endsWith("\n") ? "" : "\n";
-    writeFileSync(file, `${snippet(id)}\n${code}${end}//# debugId=${id}\n`);
+    writeFileSync(file, `${snippet(id)}\n${code}${bundled ? "" : `${end}//# debugId=${id}\n`}`);
     writeFileSync(
       map,
       JSON.stringify({ ...parsed, mappings: `;${parsed.mappings}`, debug_id: id, debugId: id }),

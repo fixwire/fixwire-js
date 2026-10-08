@@ -15,9 +15,14 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import {
+  createServer as createHttpServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { extname, join, normalize, resolve } from "node:path";
 
 import { type Json, thrown } from "../../../packages/core/test/helpers.ts";
 import type { Ingest } from "../../test/ingest.ts";
@@ -185,6 +190,43 @@ export async function serve(
       await new Promise((r) => setTimeout(r, 250));
     }
   }
+}
+
+const TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript",
+  ".mjs": "text/javascript",
+  ".css": "text/css",
+  ".json": "application/json",
+  ".ico": "image/x-icon",
+  ".svg": "image/svg+xml",
+};
+
+/**
+ * Serves a static build (a single-page app: unknown paths get index.html)
+ * on `port`; `api` answers what it takes on, such as a failing endpoint.
+ */
+export async function serveStatic(
+  dir: string,
+  port: number,
+  api?: (request: IncomingMessage, response: ServerResponse) => boolean,
+): Promise<Server> {
+  const root = resolve(dir);
+  const server = createHttpServer((request, response) => {
+    if (api?.(request, response)) return;
+    const path = decodeURIComponent((request.url ?? "/").split("?")[0] ?? "/");
+    let file = normalize(join(root, path));
+    if (!file.startsWith(root) || !existsSync(file) || !/\.[a-z0-9]+$/i.test(file))
+      file = join(root, "index.html");
+    response.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream" });
+    response.end(readFileSync(file));
+  });
+  await new Promise<void>((done) => server.listen(port, "127.0.0.1", done));
+  return {
+    url: `http://127.0.0.1:${port}`,
+    output: () => "",
+    stop: () => new Promise((done) => server.close(() => done())),
+  };
 }
 
 /** Chromium (the headless shell), from the workspace's Playwright. */

@@ -21,8 +21,8 @@ kept in Europe._
 Welcome to the official JavaScript SDK for **[Fixwire](https://fixwire.io)**.
 It captures errors and crashes, traces, release health, cron monitor
 check-ins, user feedback and AI agent runs from Node.js, browsers, edge
-runtimes, React, Next.js, Vue, Nuxt and SvelteKit apps, written in JavaScript or
-TypeScript.
+runtimes, React, Next.js, Vue, Nuxt, SvelteKit and Angular apps, written in
+JavaScript or TypeScript.
 
 | Package | For |
 |---|---|
@@ -34,6 +34,7 @@ TypeScript.
 | [`@fixwire/vue`](https://github.com/fixwire/fixwire-js/tree/main/packages/vue) | Vue 3.3+: the errors Vue catches with their component, and vue-router's routes as page names |
 | [`@fixwire/nuxt`](https://github.com/fixwire/fixwire-js/tree/main/packages/nuxt) | Nuxt 3.13+: a module for the browser and the server, with Vue's and Nitro's errors and route names |
 | [`@fixwire/sveltekit`](https://github.com/fixwire/fixwire-js/tree/main/packages/sveltekit) | SvelteKit 2 and 3: server and browser errors with route names, a Vite plugin for source maps, from one import |
+| [`@fixwire/angular`](https://github.com/fixwire/fixwire-js/tree/main/packages/angular) | Angular 20+: an ErrorHandler, HttpClient's failures, `@boundary` errors and the Router's routes as page names |
 | [`@fixwire/core`](https://github.com/fixwire/fixwire-js/tree/main/packages/core) | What they share: the client, scopes, redaction, budgets and delivery (installed with them) |
 
 ## 📦 Getting started
@@ -46,8 +47,9 @@ TypeScript.
 - Or a modern browser, an edge runtime (Cloudflare Workers, Vercel Edge,
   Deno Deploy, Netlify Edge Functions), React 18 or 19 for
   `@fixwire/react`, Next.js 15.3 or newer for `@fixwire/nextjs`, Vue 3.3 or
-  newer for `@fixwire/vue`, Nuxt 3.13 or newer for `@fixwire/nuxt`, and
-  SvelteKit 2 or 3 for `@fixwire/sveltekit`.
+  newer for `@fixwire/vue`, Nuxt 3.13 or newer for `@fixwire/nuxt`,
+  SvelteKit 2 or 3 for `@fixwire/sveltekit`, and Angular 20 or newer for
+  `@fixwire/angular`.
 
 ### Installation
 
@@ -60,8 +62,8 @@ yarn add @fixwire/node
 ```
 
 For React, add `@fixwire/react` next to `@fixwire/browser`; for Next.js, Vue,
-Nuxt and SvelteKit, `@fixwire/nextjs`, `@fixwire/vue`, `@fixwire/nuxt` or
-`@fixwire/sveltekit` alone. Every package is fully typed, and each depends only
+Nuxt, SvelteKit and Angular, the framework's package alone (`@fixwire/nextjs`,
+`@fixwire/vue`, `@fixwire/nuxt`, `@fixwire/sveltekit`, `@fixwire/angular`). Every package is fully typed, and each depends only
 on other `@fixwire` packages.
 
 ### Basic configuration
@@ -150,6 +152,7 @@ seconds at most).
 | Vue | The errors Vue catches with their component; vue-router's routes name pages, navigations and errors | `@fixwire/vue` ([details](https://github.com/fixwire/fixwire-js/tree/main/packages/vue)) |
 | Nuxt | The browser and the server from one module: Vue's, server rendering's and Nitro's errors, routes as names, debug ids in the build | `modules: ["@fixwire/nuxt"]` ([details](https://github.com/fixwire/fixwire-js/tree/main/packages/nuxt)) |
 | SvelteKit | Unexpected errors from load functions, actions, endpoints and the browser, named after their routes; traces the browser continues; debug ids in the build | `@fixwire/sveltekit` ([details](https://github.com/fixwire/fixwire-js/tree/main/packages/sveltekit)) |
+| Angular | What Angular's ErrorHandler gets, HttpClient's failures with status and URL, `@boundary` errors with their component, the Router's routes as names | `provideFixwire()` from `@fixwire/angular` ([details](https://github.com/fixwire/fixwire-js/tree/main/packages/angular)) |
 | Cloudflare Workers | Fetch handlers, cron triggers and queue consumers: a scope, a segment and error reporting each, sent through `ctx.waitUntil` | `Fixwire.withFixwire(options, handlers)` from `@fixwire/edge` |
 | Vercel Edge, Next.js middleware, Deno, Netlify Edge | A scope and a segment per request, errors reported, sent through `waitUntil` | `Fixwire.wrapRequestHandler(handler, { waitUntil })` from `@fixwire/edge` |
 | Offline delivery | Requests kept until the server has them: on disk in Node.js, in IndexedDB in browsers | `offline: true` (Node.js); `offline: makeIndexedDbSpool` from `@fixwire/browser/offline` |

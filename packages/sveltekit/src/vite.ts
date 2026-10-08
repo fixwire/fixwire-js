@@ -63,11 +63,13 @@ export function debugIdFor(content: string): string {
 }
 
 const MAP_URL = /\n\/\/[#@] sourceMappingURL=\S+\s*$/;
+const DEBUG_ID = /^\/\/# debugId=([0-9a-fA-F-]{36})\s*$/m;
 
 /**
  * Stamps each chunk that has a source map: the snippet on a line of its own
  * before the code (the map's lines move down by one, nothing else changes)
- * and a `//# debugId=` comment, which goes before a sourceMappingURL one.
+ * and a `//# debugId=` comment, which goes before a sourceMappingURL one; a
+ * chunk whose bundler wrote its debug id keeps it and gets the snippet.
  * Chunks with a directive prologue or a hashbang (which must stay first) or
  * stamped before are left alone. Returns how many it stamped.
  */
@@ -75,15 +77,20 @@ export function stampBundle(bundle: Record<string, ChunkLike | AssetLike>): numb
   let stamped = 0;
   for (const chunk of Object.values(bundle)) {
     if (chunk.type !== "chunk" || /^\s*(#!|["'])/.test(chunk.code)) continue;
-    if (/^\/\/# debugId=/m.test(chunk.code)) continue;
+    // A bundler may have written the debug id: then only the snippet is missing.
+    const bundled = DEBUG_ID.exec(chunk.code)?.[1]?.toLowerCase();
+    const id = bundled ?? debugIdFor(chunk.code);
+    if (chunk.code.includes(`g._fixwireDebugIds[s]="${id}"`)) continue;
     const asset = bundle[`${chunk.fileName}.map`];
     const mapAsset = asset?.type === "asset" ? asset : undefined;
     if (!chunk.map && !mapAsset) continue;
-    const id = debugIdFor(chunk.code);
-    const url = MAP_URL.exec(chunk.code);
-    const body = url ? chunk.code.slice(0, url.index) : chunk.code;
-    const end = body.endsWith("\n") ? "" : "\n";
-    chunk.code = `${snippet(id)}\n${body}${end}//# debugId=${id}${url ? url[0] : "\n"}`;
+    if (bundled) chunk.code = `${snippet(id)}\n${chunk.code}`;
+    else {
+      const url = MAP_URL.exec(chunk.code);
+      const body = url ? chunk.code.slice(0, url.index) : chunk.code;
+      const end = body.endsWith("\n") ? "" : "\n";
+      chunk.code = `${snippet(id)}\n${body}${end}//# debugId=${id}${url ? url[0] : "\n"}`;
+    }
     if (chunk.map)
       Object.assign(chunk.map, { mappings: `;${chunk.map.mappings}`, debug_id: id, debugId: id });
     if (mapAsset) {
