@@ -2,7 +2,7 @@
 
 _Bugs reach production. Fixwire finds them first: errors, traces, logs and
 AI agent runs in one place, an AI debugger on every plan, and your data
-kept in Europe._
+kept in the region you choose._
 
 [![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?logo=discord&logoColor=white)](https://fixwire.io/discord)
 [![Slack](https://img.shields.io/badge/Slack-community-4A154B?logo=slack&logoColor=white)](https://fixwire.io/slack)
@@ -96,7 +96,8 @@ The SDK never keeps the process alive: at the end of a short script,
 - **OpenTelemetry inside.** Errors, messages and spans travel as
   OpenTelemetry (OTLP/HTTP JSON), so your OpenTelemetry SDK can send to the
   same endpoint (`Fixwire.otlpExporterOptions(dsn)`).
-- **Your data stays in Europe.** Fixwire runs in Europe.
+- **Your data stays where you want it.** Fixwire keeps it in the region you
+  choose for your project: the EU today, more regions soon.
 
 ## 🧩 Integrations
 

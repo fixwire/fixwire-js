@@ -2,7 +2,7 @@
 
 _Bugs reach production. Fixwire finds them first: errors, traces, logs and
 AI agent runs in one place, an AI debugger on every plan, and your data
-kept in Europe._
+kept in the region you choose._
 
 [![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?logo=discord&logoColor=white)](https://fixwire.io/discord)
 [![Slack](https://img.shields.io/badge/Slack-community-4A154B?logo=slack&logoColor=white)](https://fixwire.io/slack)
@@ -90,7 +90,8 @@ Uncaught errors and unhandled rejections are reported by themselves.
   never break `fetch` or `console`.
 - **Small.** About 16 KB gzipped for errors; tracing is opt-in (about 3 KB
   more), and the offline store a separate import (0.5 KB more).
-- **Your data stays in Europe.** Fixwire runs in Europe.
+- **Your data stays where you want it.** Fixwire keeps it in the region you
+  choose for your project: the EU today, more regions soon.
 
 ## 🧩 Integrations
 

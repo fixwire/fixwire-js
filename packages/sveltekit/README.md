@@ -2,7 +2,7 @@
 
 _Bugs reach production. Fixwire finds them first: errors, traces, logs and
 AI agent runs in one place, an AI debugger on every plan, and your data
-kept in Europe._
+kept in the region you choose._
 
 [![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?logo=discord&logoColor=white)](https://fixwire.io/discord)
 [![Slack](https://img.shields.io/badge/Slack-community-4A154B?logo=slack&logoColor=white)](https://fixwire.io/slack)
@@ -150,7 +150,8 @@ export const load = async ({ params }) => {
 - **Secrets stay where they are.** Request headers come from an allowlist
   (cookies and authorization never leave), and secrets and personal data
   are masked before sending.
-- **Your data stays in Europe.** Fixwire runs in Europe.
+- **Your data stays where you want it.** Fixwire keeps it in the region you
+  choose for your project: the EU today, more regions soon.
 
 ## 🧩 Integrations
 
